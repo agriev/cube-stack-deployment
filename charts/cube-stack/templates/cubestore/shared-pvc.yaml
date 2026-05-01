@@ -1,0 +1,23 @@
+{{- if and .Values.cubestore.enabled (eq (include "cubeStack.cubestore.usesSharedPvc" .) "true") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-shared-data" (include "cubeStack.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore") | nindent 4 }}
+  annotations:
+    {{- include "cubeStack.annotations" . | nindent 4 }}
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- range .Values.cubestore.remoteStorage.sharedPvc.accessModes }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- $sc := default .Values.global.storageClass .Values.cubestore.remoteStorage.sharedPvc.storageClass }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.cubestore.remoteStorage.sharedPvc.size | quote }}
+{{- end }}

@@ -1,0 +1,84 @@
+# Quickstart overlay — fastest path to a working playground.
+# Use ONLY for first-touch / demo / kind clusters. Not for production.
+#
+#   helm upgrade --install cube charts/cube-stack \
+#     -f charts/cube-stack/values.yaml \
+#     -f charts/cube-stack/values-quickstart.yaml \
+#     -n cube --create-namespace
+#
+# What it does:
+#   - bundles a hello-world Cube model (orders cube with synthetic SQL data)
+#   - sets cube.devMode=true so the playground is reachable at /
+#   - drops Cube Store to a single worker on a small RWO PVC
+#   - removes the "real datasource required" validation
+#
+# Combine with examples/postgres-dev.yaml if you want a real DB:
+#   kubectl apply -f examples/postgres-dev.yaml
+#   ...then `--set datasources.default.host=postgres.default.svc.cluster.local`
+
+quickstart:
+  enabled: true
+
+global:
+  topologySpread: ""
+
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+refreshWorker:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+cubestore:
+  router:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    persistence:
+      size: 2Gi
+  workers:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    persistence:
+      size: 2Gi
+    pdb:
+      enabled: false
+  remoteStorage:
+    type: shared-pvc
+    sharedPvc:
+      size: 5Gi
+      accessModes: ["ReadWriteOnce"]
+
+# DuckDB ships with the Cube image, so quickstart can bootstrap with no
+# external database. Override datasources.default.* to point at a real DB.
+datasources:
+  default:
+    type: duckdb
+    database: ":memory:"

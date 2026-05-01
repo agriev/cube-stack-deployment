@@ -1,0 +1,171 @@
+{{- if .Values.cubestore.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cubeStack.cubestore.router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+spec:
+  serviceName: {{ include "cubeStack.cubestore.router.fullname" . }}
+  replicas: {{ .Values.cubestore.router.replicas }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 8 }}
+        {{- with .Values.cubestore.router.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/secrets: {{ include (print .Template.BasePath "/common/secrets.yaml") . | sha256sum }}
+        {{- with .Values.cubestore.router.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cubeStack.cubestore.router.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: cubestore
+          image: {{ include "cubeStack.cubestoreImage" . | quote }}
+          imagePullPolicy: {{ .Values.cubestoreImage.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: meta
+              containerPort: {{ .Values.cubestore.metaPort }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.cubestore.httpPort }}
+              protocol: TCP
+            - name: mysql
+              containerPort: {{ .Values.cubestore.mysqlPort }}
+              protocol: TCP
+            - name: status
+              containerPort: {{ .Values.cubestore.statusPort }}
+              protocol: TCP
+          env:
+            - name: CUBESTORE_SERVER_NAME
+              value: {{ printf "%s:%d" (include "cubeStack.cubestore.router.fullname" .) (.Values.cubestore.metaPort | int) | quote }}
+            - name: CUBESTORE_META_PORT
+              value: {{ .Values.cubestore.metaPort | quote }}
+            - name: CUBESTORE_PORT
+              value: {{ .Values.cubestore.mysqlPort | quote }}
+            - name: CUBESTORE_HTTP_PORT
+              value: {{ .Values.cubestore.httpPort | quote }}
+            - name: CUBESTORE_STATUS_PORT
+              value: {{ .Values.cubestore.statusPort | quote }}
+            {{- include "cubeStack.cubestoreEnv" . | nindent 12 }}
+            {{- include "cubeStack.cubestore.workersEnv" . | nindent 12 }}
+            {{- with .Values.cubestore.router.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+          {{- with .Values.cubestore.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.cubestore.router.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: status
+            initialDelaySeconds: {{ .Values.cubestore.router.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cubestore.router.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.cubestore.router.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.cubestore.router.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.cubestore.router.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: status
+            initialDelaySeconds: {{ .Values.cubestore.router.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cubestore.router.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.cubestore.router.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.cubestore.router.readinessProbe.failureThreshold }}
+          {{- end }}
+          resources: {{- toYaml .Values.cubestore.router.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.cubestore.router.persistence.mountPath }}
+            {{- if not (include "cubeStack.cubestore.hasCloudBucket" .) }}
+            - name: shared
+              mountPath: {{ .Values.cubestore.remoteStorage.sharedPvc.mountPath }}
+            {{- end }}
+            {{- if eq .Values.cubestore.remoteStorage.type "gcs" }}
+            - name: gcs-credentials
+              mountPath: /etc/cubestore/gcs
+              readOnly: true
+            {{- end }}
+        {{- if .Values.metrics.statsdExporter.enabled }}
+        {{- include "cubeStack.statsdExporter.container" . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- if not .Values.cubestore.router.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if eq (include "cubeStack.cubestore.usesSharedPvc" .) "true" }}
+        - name: shared
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-shared-data" (include "cubeStack.fullname" .) }}
+        {{- else if not (include "cubeStack.cubestore.hasCloudBucket" .) }}
+        - name: shared
+          emptyDir: {}
+        {{- end }}
+        {{- if eq .Values.cubestore.remoteStorage.type "gcs" }}
+        - name: gcs-credentials
+          secret:
+            {{- if .Values.cubestore.remoteStorage.gcs.existingSecret }}
+            secretName: {{ .Values.cubestore.remoteStorage.gcs.existingSecret | quote }}
+            {{- else }}
+            secretName: {{ include "cubeStack.secrets.fullname" . }}
+            {{- end }}
+            items:
+              - key: {{ default "cubestore-gcs-credentials" .Values.cubestore.remoteStorage.gcs.credentialsKey }}
+                path: credentials.json
+        {{- end }}
+      {{- with .Values.cubestore.router.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cubestore.router.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cubestore.router.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $tsc := include "cubeStack.topologySpread" (dict "ctx" . "component" "cubestore-router" "user" .Values.cubestore.router.topologySpreadConstraints) }}
+      {{- if trim $tsc }}
+      topologySpreadConstraints:
+        {{- $tsc | nindent 8 }}
+      {{- end }}
+  {{- if .Values.cubestore.router.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 10 }}
+        {{- with .Values.cubestore.router.persistence.annotations }}
+        annotations: {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- range .Values.cubestore.router.persistence.accessModes }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- $sc := default .Values.global.storageClass .Values.cubestore.router.persistence.storageClass }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.cubestore.router.persistence.size | quote }}
+  {{- end }}
+{{- end }}

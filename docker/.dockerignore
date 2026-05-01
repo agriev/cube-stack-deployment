@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+.npm
+.git
+.github
+*.md
+.DS_Store
+schema-example/.cubestore

@@ -1,0 +1,727 @@
+# =============================================================================
+# cube-stack — single configuration file for the entire Cube.js semantic layer.
+# Every component (API, refresh worker, Cube Store router/workers, cache, ingress)
+# is parameterised here. Override only the values you need from this file.
+# =============================================================================
+
+## -----------------------------------------------------------------------------
+## Global settings shared by every component
+## -----------------------------------------------------------------------------
+global:
+  # Override release name (defaults to .Release.Name)
+  nameOverride: ""
+  fullnameOverride: ""
+
+  # Image tag pinned for reproducibility. Pin both Cube and Cube Store to the
+  # same version — they ship in lock-step.
+  imageTag: "v1.6.41"
+
+  # Image pull secrets applied to every Pod
+  imagePullSecrets: []
+  # - name: my-registry-secret
+
+  # Common labels / annotations applied to every rendered object
+  commonLabels: {}
+  commonAnnotations: {}
+
+  # Default storage class used by PVCs unless overridden per component
+  storageClass: ""
+
+  # Pod priority class name (e.g. "system-cluster-critical")
+  priorityClassName: ""
+
+  # Common topology spread / anti-affinity behaviour. Component-level overrides
+  # win. Set to "soft" to recommend across zones, "hard" to require.
+  topologySpread: soft
+
+  # Cluster domain (used to build internal FQDNs)
+  clusterDomain: cluster.local
+
+## -----------------------------------------------------------------------------
+## Cube image configuration (used by API + refresh worker)
+## -----------------------------------------------------------------------------
+image:
+  # Use cubejs/cube for vanilla Community Edition, or your private registry for
+  # a custom image (built from docker/Dockerfile in this repository).
+  repository: cubejs/cube
+  # Empty tag falls back to global.imageTag and ultimately to .Chart.AppVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+## -----------------------------------------------------------------------------
+## Cube Store image configuration (router + workers)
+##
+## ARCHITECTURE: cubejs/cubestore main tags ship LINUX/AMD64 ONLY. For
+## linux/arm64 nodes (Apple Silicon kind, Graviton, ARM cloud VMs) use the
+## `-arm64v8` suffix variant. For amd64 hosts without AVX instructions (older
+## CPUs / certain VMs) use the `-non-avx` suffix.
+##
+## Set `cubestoreImage.archSuffix` to add a per-arch suffix to the resolved
+## tag, e.g. archSuffix: "-arm64v8" → "v1.6.41-arm64v8".
+## -----------------------------------------------------------------------------
+cubestoreImage:
+  repository: cubejs/cubestore
+  tag: ""
+  archSuffix: ""        # "" | "-arm64v8" | "-non-avx"
+  pullPolicy: IfNotPresent
+
+## -----------------------------------------------------------------------------
+## Pod-level security context applied to every Cube/Cube Store Pod
+## -----------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+## -----------------------------------------------------------------------------
+## Container security context (per-container)
+## -----------------------------------------------------------------------------
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # Cube needs to write to /cube/conf at runtime
+  capabilities:
+    drop:
+      - ALL
+
+## -----------------------------------------------------------------------------
+## Quickstart — sets sane defaults for a first-time install on a fresh cluster.
+## When enabled, the chart:
+##   - mounts a hello-world cube schema (orders example)
+##   - skips the "datasource is empty" validation so you can deploy without DB
+##   - enables CUBEJS_DEV_MODE so the Cube playground at /<host>/ is reachable
+## Disable for production. See README → "Will it boot out of the box?".
+## -----------------------------------------------------------------------------
+quickstart:
+  enabled: false
+
+## -----------------------------------------------------------------------------
+## Cube core configuration (env vars common to all Cube Pods)
+## -----------------------------------------------------------------------------
+cube:
+  # Production toggle. Disable dev mode in production.
+  devMode: false
+  logLevel: info  # trace | debug | info | warn | error
+
+  # Telemetry (anonymous usage stats sent to Cube Dev). Disable for air-gapped.
+  telemetry: false
+
+  # API protocols
+  apiPort: 4000        # REST/GraphQL
+  pgSqlPort: 15432     # Postgres wire-protocol (SQL API). 0 disables.
+  sqlPort: 13306       # MySQL/SQL API
+  statusPort: 0        # Optional /readyz dedicated port. 0 keeps it on apiPort.
+  webSockets: false    # CUBEJS_WEB_SOCKETS — enable real-time subscriptions
+
+  # Cluster-wide secret used to sign requests between Cube components and to
+  # validate API tokens. Generate via `openssl rand -hex 64`.
+  apiSecret: ""
+  # Or load from an existing secret (overrides apiSecret)
+  apiSecretFromSecret:
+    name: ""
+    key: ""
+
+  # SQL API authentication (CUBEJS_SQL_USER / CUBEJS_SQL_PASSWORD).
+  # When set, BI tools must authenticate to the pgSqlPort/sqlPort listeners.
+  sqlAuth:
+    user: ""
+    password: ""
+    existingSecret: ""        # secret with keys "username" + "password"
+
+  # CORS — set to "*" for browser dashboards
+  cors: ""
+
+  # Default API scopes restriction (e.g. "graphql,meta" disables /load).
+  # Empty = no restriction.
+  defaultApiScopes: ""
+
+  # ---- Concurrency / queueing -----------------------------------------------
+  concurrency: 5                 # CUBEJS_CONCURRENCY — DB connections per query queue
+  maxSessions: 1024              # CUBEJS_MAX_SESSIONS — concurrent user sessions
+  dbQueryTimeout: "10m"          # CUBEJS_DB_QUERY_TIMEOUT — long pre-aggs need this raised
+  dbQueryLimit: 50000            # CUBEJS_DB_QUERY_LIMIT — max rows per query
+
+  # ---- Scheduled refresh / pre-aggregations ---------------------------------
+  schedulerInterval: ""          # CUBEJS_SCHEDULED_REFRESH_TIMER (default 10s)
+  preAggregationsSchema: "prod_pre_aggregations"  # warehouse schema for built tables
+  rollupOnlyMode: false          # CUBEJS_ROLLUP_ONLY — restrict queries to rollups
+  externalDefault: true          # CUBEJS_EXTERNAL_DEFAULT — pre-aggs land in Cube Store
+
+  # ---- Cache & queue driver --------------------------------------------------
+  # Cube Store is the modern default and removes the need for Redis.
+  cacheAndQueueDriver: cubestore  # cubestore | redis
+
+  # ---- Schema layout ---------------------------------------------------------
+  schemaPath: model
+  basePath: /cube
+
+  # JWT-based authentication
+  jwt:
+    enabled: false
+    audience: ""
+    issuer: ""
+    algorithms: "RS256"  # comma-separated list
+    jwkUrl: ""
+    key: ""
+    keyFromSecret:
+      name: ""
+      key: ""
+    claimsNamespace: ""
+
+  # Free-form extra env vars merged into every Cube Pod (API + refresh worker)
+  extraEnv: []
+  # - name: CUBEJS_DB_TYPE
+  #   value: postgres
+
+  # Pull additional env from existing ConfigMaps / Secrets
+  extraEnvFrom: []
+  # - secretRef:
+  #     name: cube-extra
+  # - configMapRef:
+  #     name: cube-extra
+
+## -----------------------------------------------------------------------------
+## Schema / configuration mounting
+##
+## Cube schemas (cube.js / model/*.yml / *.js) can be supplied in three ways:
+##   1. baked into a custom image (image.repository pointing to your registry)
+##   2. mounted from a ConfigMap (declarative, recommended for small repos)
+##   3. fetched from git via an init container (for large schema repos)
+## -----------------------------------------------------------------------------
+schema:
+  # ConfigMap-based: rendered into /cube/conf inside the Pod.
+  configMap:
+    enabled: false
+    # If empty the chart renders one from `inline` below.
+    name: ""
+    mountPath: /cube/conf
+    inline: {}
+    # cube.js: |
+    #   module.exports = { schemaPath: 'model' };
+    # model/orders.yml: |
+    #   cubes:
+    #     - name: orders
+    #       sql_table: public.orders
+    #       measures: [{ name: count, type: count }]
+
+  # Git-based: clones <repoUrl>:<ref> into /cube/conf via an init container.
+  git:
+    enabled: false
+    repoUrl: ""
+    ref: main
+    subPath: ""
+    image:
+      repository: alpine/git
+      tag: "2.45.2"
+      pullPolicy: IfNotPresent
+    # Use SSH or HTTPS auth via existing secret (mounted at /etc/git-secret)
+    auth:
+      existingSecret: ""
+      sshKeyKey: id_rsa
+      tokenKey: token
+    resources: {}
+
+## -----------------------------------------------------------------------------
+## Cube API service (request-serving Pods, scaled by HPA)
+## -----------------------------------------------------------------------------
+api:
+  enabled: true
+  replicas: 2
+
+  service:
+    type: ClusterIP
+    annotations: {}
+    # Set explicit ports on the Service; container ports come from cube.* above
+    extraPorts: []
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    behavior: {}  # full HPAv2 behavior block, optional
+
+  # PodDisruptionBudget
+  pdb:
+    enabled: true
+    minAvailable: 1
+    # maxUnavailable: 1   # use one or the other
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+
+  # Probes (use Cube's built-in /livez and /readyz)
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 5
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    periodSeconds: 5
+    failureThreshold: 60
+
+  # Scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []  # auto-generated if empty and global.topologySpread is set
+
+  # Per-component env additions
+  extraEnv: []
+  extraEnvFrom: []
+
+  # Sidecars / init containers (e.g. cloud SQL proxy)
+  initContainers: []
+  sidecars: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  podLabels: {}
+  podAnnotations: {}
+  terminationGracePeriodSeconds: 60
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    automountServiceAccountToken: true
+
+## -----------------------------------------------------------------------------
+## Cube Refresh Worker (background pre-aggregation builder)
+## -----------------------------------------------------------------------------
+refreshWorker:
+  enabled: true
+  replicas: 1
+
+  # ---- Refresh tuning -------------------------------------------------------
+  # concurrency: parallel pre-aggregation builds per worker (DB connections).
+  # Cube docs recommend 4 for typical workloads, raise for heavy schedules.
+  concurrency: 4               # CUBEJS_REFRESH_WORKER_CONCURRENCY
+  queriesPerAppId: 10          # CUBEJS_SCHEDULED_REFRESH_QUERIES_PER_APP_ID
+  timezones: ""                # CUBEJS_SCHEDULED_REFRESH_TIMEZONES, e.g. "UTC,Europe/Berlin"
+  batchingRowSplit: 256        # CUBEJS_BATCHING_ROW_SPLIT — chunk size for big rollups
+
+  # Refresh workers can scale on CPU but typically you want one per data source
+  # for predictable scheduling. Keep autoscaling off unless schedules are
+  # cleanly partitioned across workers.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 85
+
+  pdb:
+    enabled: false
+    minAvailable: 0
+
+  resources:
+    # Cube docs: 6 GiB minimum for refresh workers. The 2 GiB request below is
+    # for first-touch / dev installs; raise to match limits in production.
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+
+  # The refresh worker is a long-running Node process with NO HTTP listener,
+  # so liveness is best left to Kubernetes' "process exited" detection. If you
+  # really need a probe, mount a sentinel file and "test -f" it.
+  livenessProbe:
+    enabled: false
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+
+  readinessProbe:
+    enabled: false  # No HTTP listener on the refresh worker
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+  extraEnv: []
+  extraEnvFrom: []
+
+  initContainers: []
+  sidecars: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  podLabels: {}
+  podAnnotations: {}
+  terminationGracePeriodSeconds: 120
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+## -----------------------------------------------------------------------------
+## Cube Store Router (single instance, holds metadata)
+##
+## Production sizing (Cube docs): 4 CPU + 8 GiB minimum per node (router and
+## each worker). Cube Store OSS does NOT replicate — a single failed node
+## means full cluster outage. Use a cloud bucket (S3 / GCS) so node loss
+## doesn't lose data and put workers on PVCs only for local cache.
+## -----------------------------------------------------------------------------
+cubestore:
+  enabled: true
+
+  # Server name used by router/workers to talk to each other. Leave empty to
+  # auto-derive from the chart fullname.
+  serverNameOverride: ""
+
+  # Ports
+  # IMPORTANT: Cube → Cube Store traffic uses httpPort (3030, JSON-over-HTTP +
+  # WebSocket). metaPort (9999) is the INTERNAL router↔workers control plane
+  # and must never be addressed by the Cube API.
+  metaPort: 9999     # router↔workers cluster control plane (do not expose)
+  workerPort: 10000  # worker↔worker traffic (do not expose)
+  httpPort: 3030     # Cube API → Cube Store query endpoint (this is the one)
+  mysqlPort: 3306    # ad-hoc SQL access via MySQL wire protocol (read-only)
+  statusPort: 3031   # /livez /readyz health endpoints
+
+  # ---- Tuning -------------------------------------------------------------
+  logLevel: warn
+  queryTimeout: 120                  # CUBESTORE_QUERY_TIMEOUT (seconds)
+  jobRunners: 4                      # CUBESTORE_JOB_RUNNERS — concurrent refresh jobs
+  awsCredsRefreshEveryMins: 180      # CUBESTORE_AWS_CREDS_REFRESH_EVERY_MINS
+  selectWorkers: 0                   # CUBESTORE_SELECT_WORKERS — 0 == use CUBESTORE_WORKERS
+
+  # Common env vars merged into router + every worker
+  extraEnv: []
+  extraEnvFrom: []
+
+  router:
+    replicas: 1
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+
+    persistence:
+      enabled: true
+      accessModes: ["ReadWriteOnce"]
+      size: 50Gi
+      storageClass: ""        # falls back to global.storageClass
+      annotations: {}
+      mountPath: /cube/.cubestore/data
+
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 5
+      failureThreshold: 5
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+
+    extraEnv: []
+    podLabels: {}
+    podAnnotations: {}
+
+    serviceAccount:
+      create: true
+      name: ""
+
+    pdb:
+      enabled: false
+      maxUnavailable: 0
+
+  workers:
+    # 0 disables the cluster (single-node mode — not recommended for prod).
+    replicas: 2
+
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 12Gi
+
+    persistence:
+      enabled: true
+      accessModes: ["ReadWriteOnce"]
+      size: 100Gi
+      storageClass: ""
+      annotations: {}
+      mountPath: /cube/.cubestore/data
+
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 60
+      periodSeconds: 15
+      timeoutSeconds: 5
+      failureThreshold: 5
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    topologySpreadConstraints: []
+
+    extraEnv: []
+    podLabels: {}
+    podAnnotations: {}
+
+    serviceAccount:
+      create: true
+      name: ""
+
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+
+    initRouterCheck:
+      enabled: true
+      image:
+        repository: busybox
+        tag: "1.36"
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+
+  ## Cube Store remote storage. Pick exactly one backend.
+  ## Without a cloud bucket the chart falls back to a shared PVC that is
+  ## mounted to BOTH router and workers (RWX storage class required).
+  remoteStorage:
+    type: ""  # "" | "shared-pvc" | "s3" | "gcs" | "minio"
+
+    sharedPvc:
+      size: 200Gi
+      accessModes: ["ReadWriteMany"]
+      storageClass: ""
+      mountPath: /cube/data
+
+    s3:
+      bucket: ""
+      region: ""
+      subPath: ""
+      accessKey: ""
+      secretKey: ""
+      existingSecret: ""
+      accessKeyKey: AWS_ACCESS_KEY_ID
+      secretKeyKey: AWS_SECRET_ACCESS_KEY
+
+    gcs:
+      bucket: ""
+      subPath: ""
+      # base64-encoded service account JSON OR existing secret
+      credentials: ""
+      existingSecret: ""
+      credentialsKey: credentials.json
+
+    minio:
+      bucket: ""
+      endpoint: ""
+      region: us-east-1
+      subPath: ""
+      accessKey: ""
+      secretKey: ""
+      existingSecret: ""
+      accessKeyKey: MINIO_ACCESS_KEY_ID
+      secretKeyKey: MINIO_SECRET_ACCESS_KEY
+
+## -----------------------------------------------------------------------------
+## Database connections (data sources)
+##
+## Pass any of: postgres / mysql / clickhouse / snowflake / bigquery / redshift
+## / databricks / trino / duckdb / etc. Multiple data sources are supported.
+##
+## The first map entry becomes the default (CUBEJS_DB_* env vars); subsequent
+## ones are namespaced as CUBEJS_DS_<NAME>_DB_*. Reference them in your model
+## with `data_source: warehouse` etc.
+##
+## NOTE: Cube docs strongly recommend configuring a DB EXPORT BUCKET for
+## Snowflake/BigQuery/Redshift — pre-aggregations are then written to the
+## warehouse → bucket → Cube Store path (much faster than streaming through
+## the API container).
+## -----------------------------------------------------------------------------
+datasources:
+  default:
+    type: postgres            # required (postgres/mysql/snowflake/bigquery/...)
+    host: ""
+    port: 5432
+    database: ""
+    user: ""
+    # Plain password OR existing secret reference
+    password: ""
+    existingSecret: ""
+    passwordKey: password
+    maxPool: 8                # CUBEJS_DB_MAX_POOL — connection pool ceiling
+    ssl:
+      enabled: false
+      rejectUnauthorized: true
+      ca: ""
+      cert: ""
+      key: ""
+    # Pre-aggregation export bucket (recommended for Snowflake/BigQuery/Redshift)
+    export:
+      type: ""                # "s3" | "gcp" | "azure"
+      bucket: ""              # e.g. "s3://my-cube-export"
+      region: ""              # AWS region
+      integration: ""         # CUBEJS_DB_EXPORT_INTEGRATION (Snowflake stage name)
+      # Bucket creds — either inline or from existing secret
+      aws:
+        key: ""
+        secret: ""
+        existingSecret: ""
+        keyKey: AWS_ACCESS_KEY_ID
+        secretKey: AWS_SECRET_ACCESS_KEY
+      gcs:
+        credentials: ""
+        existingSecret: ""
+        credentialsKey: credentials.json
+    extraEnv: []
+    # - name: CUBEJS_DB_MAX_POOL
+    #   value: "20"
+
+## -----------------------------------------------------------------------------
+## Redis (legacy queue/cache driver). Only enable when cube.cacheAndQueueDriver
+## is "redis". Otherwise Cube Store handles caching and queuing.
+## -----------------------------------------------------------------------------
+redis:
+  enabled: false
+  architecture: standalone
+  auth:
+    enabled: true
+    password: ""
+    existingSecret: ""
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+  # Use an external (non-bundled) Redis instead of the bundled bitnami chart
+  external:
+    url: ""               # e.g. redis://redis.svc:6379
+    passwordFromSecret:
+      name: ""
+      key: password
+    tls: false
+    poolMin: 5
+    poolMax: 1000
+
+## -----------------------------------------------------------------------------
+## Ingress (HTTP/REST and SQL endpoints)
+## -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  # nginx.ingress.kubernetes.io/proxy-body-size: 50m
+  hosts:
+    - host: cube.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: cube-tls
+  #   hosts:
+  #     - cube.example.com
+
+## -----------------------------------------------------------------------------
+## Observability
+## -----------------------------------------------------------------------------
+metrics:
+  # Cube Store exposes metrics via statsd; this sidecar converts to Prometheus.
+  statsdExporter:
+    enabled: false
+    image:
+      repository: prom/statsd-exporter
+      tag: "v0.27.1"
+      pullPolicy: IfNotPresent
+    statsdPort: 8125  # UDP
+    httpPort: 9102
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+  # ServiceMonitor for the Prometheus Operator
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    relabelings: []
+    metricRelabelings: []
+
+  # Optional Grafana dashboard ConfigMap (auto-imported by sidecars)
+  grafanaDashboard:
+    enabled: false
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+
+## -----------------------------------------------------------------------------
+## Network policies — restrict ingress between components
+## -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # Pod selectors allowed to reach the API
+  apiAllowFrom: []
+  # - namespaceSelector:
+  #     matchLabels:
+  #       name: dashboards
+  # Allow all egress (default true; tighten for sensitive environments)
+  allowAllEgress: true
+
+## -----------------------------------------------------------------------------
+## Tests run via `helm test`
+## -----------------------------------------------------------------------------
+tests:
+  enabled: true
+  image:
+    repository: curlimages/curl
+    tag: "8.10.1"
+    pullPolicy: IfNotPresent

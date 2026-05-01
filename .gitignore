@@ -1,0 +1,23 @@
+.DS_Store
+*.swp
+*.bak
+*.tmp
+
+# Helm
+charts/cube-stack/charts/
+charts/cube-stack/Chart.lock
+*.tgz
+
+# Rendered output / scratch
+_packages/
+_rendered/
+rendered-*.yaml
+
+# Editors
+.idea/
+.vscode/
+
+# Local secrets
+*.local.yaml
+*.secrets.yaml
+.claude/

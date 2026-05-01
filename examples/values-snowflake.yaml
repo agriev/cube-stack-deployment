@@ -1,0 +1,29 @@
+# Example: Cube + Snowflake + S3 export bucket.
+# Combine with values.yaml: helm install cube ./charts/cube-stack -f values.yaml -f examples/values-snowflake.yaml
+
+datasources:
+  default:
+    type: snowflake
+    extraEnv:
+      - name: CUBEJS_DB_SNOWFLAKE_ACCOUNT
+        value: my-account.us-east-1
+      - name: CUBEJS_DB_SNOWFLAKE_REGION
+        value: us-east-1
+      - name: CUBEJS_DB_SNOWFLAKE_WAREHOUSE
+        value: COMPUTE_WH
+      - name: CUBEJS_DB_SNOWFLAKE_ROLE
+        value: ANALYST
+    user: CUBE
+    existingSecret: cube-snowflake
+    passwordKey: password
+    database: ANALYTICS
+
+cubestore:
+  remoteStorage:
+    type: s3
+    s3:
+      bucket: my-cube-prod
+      region: us-east-1
+      existingSecret: cube-aws
+      accessKeyKey: access-key-id
+      secretKeyKey: secret-access-key

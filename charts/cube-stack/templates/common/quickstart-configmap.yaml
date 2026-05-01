@@ -1,0 +1,51 @@
+{{- /*
+Quickstart mode — automatically renders a hello-world Cube schema so a fresh
+`helm install --set quickstart.enabled=true` produces a working playground.
+
+Production users should set quickstart.enabled=false and configure their own
+schema via schema.configMap.inline OR schema.git OR a baked image.
+*/ -}}
+{{- if and .Values.quickstart.enabled (not .Values.schema.configMap.enabled) (not .Values.schema.git.enabled) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-quickstart" (include "cubeStack.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.labels" . | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+data:
+  cube.js: |
+    // Quickstart Cube configuration. Replace with your own.
+    module.exports = {
+      schemaPath: 'model',
+    };
+  model_orders.yml: |
+    cubes:
+      - name: orders
+        sql: >
+          SELECT 1 AS id, 'placed' AS status, 100 AS amount,
+                 NOW()::timestamp AS created_at
+          UNION ALL
+          SELECT 2, 'shipped', 250, NOW() - interval '1 day'
+          UNION ALL
+          SELECT 3, 'delivered', 999, NOW() - interval '2 day'
+
+        measures:
+          - name: count
+            type: count
+          - name: total_amount
+            sql: amount
+            type: sum
+
+        dimensions:
+          - name: id
+            sql: id
+            type: number
+            primary_key: true
+          - name: status
+            sql: status
+            type: string
+          - name: created_at
+            sql: created_at
+            type: time
+{{- end }}

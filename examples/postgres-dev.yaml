@@ -1,0 +1,40 @@
+# Minimal Postgres for kind/minikube dev installs.
+# Apply with: kubectl apply -f examples/postgres-dev.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: default
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres
+  namespace: default
+  labels:
+    app: postgres
+spec:
+  containers:
+    - name: postgres
+      image: postgres:16-alpine
+      env:
+        - name: POSTGRES_USER
+          value: cube
+        - name: POSTGRES_PASSWORD
+          value: cube
+        - name: POSTGRES_DB
+          value: cube_demo
+      ports:
+        - containerPort: 5432
+      readinessProbe:
+        exec:
+          command: ["pg_isready", "-U", "cube"]
+        initialDelaySeconds: 5
+        periodSeconds: 5

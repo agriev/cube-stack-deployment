@@ -1,0 +1,176 @@
+{{- if and .Values.cubestore.enabled (gt (.Values.cubestore.workers.replicas | int) 0) }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cubeStack.cubestore.workers.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+spec:
+  serviceName: {{ include "cubeStack.cubestore.workers.headless" . }}
+  replicas: {{ .Values.cubestore.workers.replicas }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 8 }}
+        {{- with .Values.cubestore.workers.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/secrets: {{ include (print .Template.BasePath "/common/secrets.yaml") . | sha256sum }}
+        {{- with .Values.cubestore.workers.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cubeStack.cubestore.workers.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      {{- if .Values.cubestore.workers.initRouterCheck.enabled }}
+      initContainers:
+        - name: wait-for-router
+          image: "{{ .Values.cubestore.workers.initRouterCheck.image.repository }}:{{ .Values.cubestore.workers.initRouterCheck.image.tag }}"
+          imagePullPolicy: {{ .Values.cubestore.workers.initRouterCheck.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until nc -vz {{ include "cubeStack.cubestore.router.fullname" . }} {{ .Values.cubestore.metaPort }}; do
+                echo "Waiting for Cube Store router..."
+                sleep 2
+              done
+          resources: {{- toYaml .Values.cubestore.workers.initRouterCheck.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: cubestore
+          image: {{ include "cubeStack.cubestoreImage" . | quote }}
+          imagePullPolicy: {{ .Values.cubestoreImage.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: worker
+              containerPort: {{ .Values.cubestore.workerPort }}
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CUBESTORE_SERVER_NAME
+              value: {{ printf "$(POD_NAME).%s:%d" (include "cubeStack.cubestore.workers.headless" .) (.Values.cubestore.workerPort | int) | quote }}
+            - name: CUBESTORE_WORKER_PORT
+              value: {{ .Values.cubestore.workerPort | quote }}
+            - name: CUBESTORE_META_ADDR
+              value: {{ printf "%s:%d" (include "cubeStack.cubestore.router.fullname" .) (.Values.cubestore.metaPort | int) | quote }}
+            {{- include "cubeStack.cubestoreEnv" . | nindent 12 }}
+            {{- include "cubeStack.cubestore.workersEnv" . | nindent 12 }}
+            {{- with .Values.cubestore.workers.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+          {{- with .Values.cubestore.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.cubestore.workers.livenessProbe.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: worker
+            initialDelaySeconds: {{ .Values.cubestore.workers.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cubestore.workers.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.cubestore.workers.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.cubestore.workers.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.cubestore.workers.readinessProbe.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: worker
+            initialDelaySeconds: {{ .Values.cubestore.workers.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cubestore.workers.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.cubestore.workers.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.cubestore.workers.readinessProbe.failureThreshold }}
+          {{- end }}
+          resources: {{- toYaml .Values.cubestore.workers.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.cubestore.workers.persistence.mountPath }}
+            {{- if not (include "cubeStack.cubestore.hasCloudBucket" .) }}
+            - name: shared
+              mountPath: {{ .Values.cubestore.remoteStorage.sharedPvc.mountPath }}
+            {{- end }}
+            {{- if eq .Values.cubestore.remoteStorage.type "gcs" }}
+            - name: gcs-credentials
+              mountPath: /etc/cubestore/gcs
+              readOnly: true
+            {{- end }}
+        {{- if .Values.metrics.statsdExporter.enabled }}
+        {{- include "cubeStack.statsdExporter.container" . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- if not .Values.cubestore.workers.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if eq (include "cubeStack.cubestore.usesSharedPvc" .) "true" }}
+        - name: shared
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-shared-data" (include "cubeStack.fullname" .) }}
+        {{- else if not (include "cubeStack.cubestore.hasCloudBucket" .) }}
+        - name: shared
+          emptyDir: {}
+        {{- end }}
+        {{- if eq .Values.cubestore.remoteStorage.type "gcs" }}
+        - name: gcs-credentials
+          secret:
+            {{- if .Values.cubestore.remoteStorage.gcs.existingSecret }}
+            secretName: {{ .Values.cubestore.remoteStorage.gcs.existingSecret | quote }}
+            {{- else }}
+            secretName: {{ include "cubeStack.secrets.fullname" . }}
+            {{- end }}
+            items:
+              - key: {{ default "cubestore-gcs-credentials" .Values.cubestore.remoteStorage.gcs.credentialsKey }}
+                path: credentials.json
+        {{- end }}
+      {{- with .Values.cubestore.workers.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cubestore.workers.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.cubestore.workers.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $tsc := include "cubeStack.topologySpread" (dict "ctx" . "component" "cubestore-workers" "user" .Values.cubestore.workers.topologySpreadConstraints) }}
+      {{- if trim $tsc }}
+      topologySpreadConstraints:
+        {{- $tsc | nindent 8 }}
+      {{- end }}
+  {{- if .Values.cubestore.workers.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 10 }}
+        {{- with .Values.cubestore.workers.persistence.annotations }}
+        annotations: {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- range .Values.cubestore.workers.persistence.accessModes }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- $sc := default .Values.global.storageClass .Values.cubestore.workers.persistence.storageClass }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.cubestore.workers.persistence.size | quote }}
+  {{- end }}
+{{- end }}

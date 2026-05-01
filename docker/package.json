@@ -1,0 +1,10 @@
+{
+  "name": "cube-stack",
+  "version": "1.0.0",
+  "description": "Custom Cube.js image with extra deps",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,28 @@
+{{- if .Values.cubestore.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeStack.cubestore.router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+  ports:
+    - name: meta
+      port: {{ .Values.cubestore.metaPort }}
+      targetPort: meta
+      protocol: TCP
+    - name: http
+      port: {{ .Values.cubestore.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: mysql
+      port: {{ .Values.cubestore.mysqlPort }}
+      targetPort: mysql
+      protocol: TCP
+    - name: status
+      port: {{ .Values.cubestore.statusPort }}
+      targetPort: status
+      protocol: TCP
+{{- end }}

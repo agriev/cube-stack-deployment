@@ -1,0 +1,79 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'chart-v*'   # e.g. chart-v1.0.0
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  release-chart:
+    name: package + push helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: extract chart version from tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF#refs/tags/chart-v}"
+          echo "version=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: ensure Chart.yaml matches tag
+        run: |
+          chart_ver=$(grep -E '^version:' charts/cube-stack/Chart.yaml | awk '{print $2}' | tr -d '"')
+          if [ "$chart_ver" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "::error::Chart.yaml version ($chart_ver) does not match tag (${{ steps.tag.outputs.version }})"
+            exit 1
+          fi
+
+      - name: helm dependency update
+        run: helm dependency update charts/cube-stack
+
+      - name: package chart
+        run: |
+          mkdir -p _packages
+          helm package charts/cube-stack --destination _packages
+
+      - name: log in to GHCR (OCI registry)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username ${{ github.actor }} --password-stdin
+
+      - name: push chart to OCI
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          for pkg in _packages/*.tgz; do
+            helm push "$pkg" "oci://ghcr.io/${owner}/charts"
+          done
+
+      - name: install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1
+
+      - name: sign chart (OCI keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          digest=$(crane digest "ghcr.io/${owner}/charts/cube-stack:${{ steps.tag.outputs.version }}" || true)
+          if [ -n "$digest" ]; then
+            cosign sign --yes "ghcr.io/${owner}/charts/cube-stack@${digest}"
+          fi
+
+      - name: create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: _packages/*.tgz

@@ -1,0 +1,60 @@
+name: security
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  pull_request:
+    paths:
+      - 'charts/**'
+      - 'docker/**'
+      - '.github/workflows/security.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: render charts for scanning
+        run: |
+          mkdir -p _rendered
+          docker run --rm -v "$PWD":/work -w /work \
+            alpine/helm:3.16.3 dependency update charts/cube-stack
+          docker run --rm -v "$PWD":/work -w /work \
+            alpine/helm:3.16.3 template ci charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-prod.yaml > _rendered/prod.yaml
+
+      - name: trivy config (k8s)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: _rendered/
+          format: sarif
+          output: trivy-k8s.sarif
+          severity: CRITICAL,HIGH
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-k8s.sarif
+          category: trivy-k8s
+
+  kube-linter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: stackrox/kube-linter-action@v1.0.5
+        with:
+          directory: charts/cube-stack
+          format: sarif
+          output-file: kube-linter.sarif
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: kube-linter.sarif
+          category: kube-linter

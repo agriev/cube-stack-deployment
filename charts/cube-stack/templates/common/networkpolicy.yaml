@@ -1,0 +1,40 @@
+{{- if .Values.networkPolicy.enabled }}
+# Allow traffic between cube-stack components and from configured callers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-internal" (include "cubeStack.fullname" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "cubeStack.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if not .Values.networkPolicy.allowAllEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "cubeStack.selectorLabels" . | nindent 14 }}
+    {{- with .Values.networkPolicy.apiAllowFrom }}
+    - from:
+{{ toYaml . | indent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.cube.apiPort }}
+        {{- if gt ($.Values.cube.pgSqlPort | int) 0 }}
+        - protocol: TCP
+          port: {{ $.Values.cube.pgSqlPort }}
+        {{- end }}
+        {{- if gt ($.Values.cube.sqlPort | int) 0 }}
+        - protocol: TCP
+          port: {{ $.Values.cube.sqlPort }}
+        {{- end }}
+    {{- end }}
+  {{- if not .Values.networkPolicy.allowAllEgress }}
+  egress:
+    - {}  # Replace with explicit egress rules in your overlay
+  {{- end }}
+{{- end }}

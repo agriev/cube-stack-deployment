@@ -1,0 +1,75 @@
+{{- include "cubeStack.validate" . -}}
+cube-stack {{ .Chart.Version }} (Cube {{ .Chart.AppVersion }}) installed.
+
+Components:
+  - Cube API:                {{ include "cubeStack.api.fullname" . }} ({{ .Values.api.replicas }} replicas{{ if .Values.api.autoscaling.enabled }} → autoscaled to {{ .Values.api.autoscaling.maxReplicas }}{{ end }})
+  - Cube Refresh Worker:     {{ if .Values.refreshWorker.enabled }}{{ include "cubeStack.refreshWorker.fullname" . }} ({{ .Values.refreshWorker.replicas }} replicas){{ else }}disabled{{ end }}
+  - Cube Store Router:       {{ if .Values.cubestore.enabled }}{{ include "cubeStack.cubestore.router.fullname" . }}{{ else }}disabled{{ end }}
+  - Cube Store Workers:      {{ if and .Values.cubestore.enabled (gt (.Values.cubestore.workers.replicas | int) 0) }}{{ include "cubeStack.cubestore.workers.fullname" . }} ({{ .Values.cubestore.workers.replicas }} replicas){{ else }}none — running in single-node mode (not recommended for production){{ end }}
+  - Cache & queue driver:    {{ .Values.cube.cacheAndQueueDriver }}
+  - Remote storage:          {{ default "shared-pvc (fallback)" .Values.cubestore.remoteStorage.type }}
+  - Schema source:           {{ if .Values.quickstart.enabled }}quickstart (demo){{ else if .Values.schema.configMap.enabled }}ConfigMap{{ else if .Values.schema.git.enabled }}git ({{ .Values.schema.git.repoUrl }}@{{ .Values.schema.git.ref }}){{ else }}baked into image (none mounted){{ end }}
+
+Reach the API:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}{{ (index .paths 0).path }}
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cubeStack.api.fullname" . }} {{ .Values.cube.apiPort }}:{{ .Values.cube.apiPort }}
+  open http://localhost:{{ .Values.cube.apiPort }}
+{{- end }}
+
+Liveness/readiness:
+  curl http://{{ include "cubeStack.api.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:{{ .Values.cube.apiPort }}/livez
+  curl http://{{ include "cubeStack.api.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:{{ .Values.cube.apiPort }}/readyz
+
+Run helm tests:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Tail logs:
+  kubectl -n {{ .Release.Namespace }} logs -f -l app.kubernetes.io/instance={{ .Release.Name }} --max-log-requests 10
+
+{{- if .Values.quickstart.enabled }}
+
+────────────────────────────────────────────────────────────────────
+QUICKSTART MODE — this install is for demo only. Do not run in production.
+The bundled "orders" cube serves synthetic SQL data; switch to a real
+data source via .datasources and disable quickstart.enabled before going live.
+────────────────────────────────────────────────────────────────────
+{{- end }}
+
+{{- if and (eq .Values.cube.cacheAndQueueDriver "redis") (not (or .Values.redis.enabled .Values.redis.external.url)) }}
+
+WARNING: cube.cacheAndQueueDriver=redis but no Redis configured. Either enable
+the bundled Redis (redis.enabled=true) or set redis.external.url.
+{{- end }}
+
+{{- if and .Values.cubestore.enabled (eq (.Values.cubestore.workers.replicas | int) 0) }}
+
+WARNING: Cube Store workers.replicas=0 — running router-only ("single-node"
+mode). Not recommended for production. Increase cubestore.workers.replicas.
+{{- end }}
+
+{{- if and .Values.cubestore.enabled (not .Values.cubestore.remoteStorage.type) }}
+
+WARNING: Cube Store remote storage is unset. Falling back to a shared
+PVC ({{ .Values.cubestore.remoteStorage.sharedPvc.size }}) — ensure your
+storage class supports ReadWriteMany. For production prefer S3/GCS via
+cubestore.remoteStorage.type.
+{{- end }}
+
+{{- if and (not .Values.quickstart.enabled) (not .Values.schema.configMap.enabled) (not .Values.schema.git.enabled) }}
+
+NOTE: No schema source configured (schema.configMap, schema.git, quickstart).
+Cube will look for /cube/conf inside the image. Either bake your model into
+a custom image (see docker/Dockerfile) or set one of those values.
+{{- end }}
+
+{{- if and .Values.cube.sqlAuth.user (not .Values.cube.sqlAuth.password) (not .Values.cube.sqlAuth.existingSecret) }}
+
+NOTE: SQL API user "{{ .Values.cube.sqlAuth.user }}" was provisioned with a
+random password. Read it back with:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "cubeStack.secrets.fullname" . }} \
+    -o jsonpath='{.data.cube-sql-password}' | base64 -d
+{{- end }}

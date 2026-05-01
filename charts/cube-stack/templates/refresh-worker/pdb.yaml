@@ -1,0 +1,16 @@
+{{- if and .Values.refreshWorker.enabled .Values.refreshWorker.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cubeStack.refreshWorker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "refresh-worker") | nindent 4 }}
+spec:
+  {{- if .Values.refreshWorker.pdb.minAvailable }}
+  minAvailable: {{ .Values.refreshWorker.pdb.minAvailable }}
+  {{- else if .Values.refreshWorker.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.refreshWorker.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "refresh-worker") | nindent 6 }}
+{{- end }}

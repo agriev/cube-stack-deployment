@@ -1,0 +1,14 @@
+{{- if and .Values.schema.configMap.enabled (not .Values.schema.configMap.name) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cubeStack.schema.configmap.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.labels" . | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+data:
+  {{- range $path, $content := .Values.schema.configMap.inline }}
+  {{ $path | replace "/" "_" }}: |
+{{ $content | indent 4 }}
+  {{- end }}
+{{- end }}

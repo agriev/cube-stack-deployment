@@ -1,0 +1,49 @@
+apiVersion: v2
+name: cube-stack
+description: |
+  Production-ready, scalable Helm chart for the Cube.js Community Edition
+  semantic layer. Bundles Cube API, Refresh Worker, Cube Store Router and
+  Cube Store Workers (cluster mode) into a single deployable unit with full
+  configuration via a single values.yaml.
+type: application
+version: 1.0.0
+appVersion: "1.6.41"
+kubeVersion: ">=1.25.0-0"
+home: https://cube.dev
+icon: https://cube.dev/downloads/cube-logo-narrow.svg
+sources:
+  - https://github.com/cube-js/cube
+keywords:
+  - cube
+  - cubejs
+  - cubestore
+  - semantic-layer
+  - analytics
+  - olap
+  - data
+maintainers:
+  - name: Platform Team
+    email: a.s.griev@gmail.com
+dependencies:
+  - name: redis
+    version: "20.6.2"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+    tags:
+      - cache
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial release with Cube 1.6.x and Cube Store cluster mode
+    - kind: added
+      description: HPA for API and refresh worker
+    - kind: added
+      description: PodDisruptionBudgets, NetworkPolicies, ServiceMonitor
+    - kind: added
+      description: Cube Store as cache/queue driver (Redis optional)
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Cube documentation
+      url: https://cube.dev/docs
+    - name: Cube Store production guide
+      url: https://cube.dev/docs/product/caching/running-in-production

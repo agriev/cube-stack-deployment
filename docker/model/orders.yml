@@ -1,0 +1,38 @@
+# Example Cube model — replace with your own data definitions.
+# https://cube.dev/docs/reference/data-model/cube
+cubes:
+  - name: orders
+    sql_table: public.orders
+
+    measures:
+      - name: count
+        type: count
+
+      - name: total_amount
+        sql: amount
+        type: sum
+        format: currency
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+
+      - name: status
+        sql: status
+        type: string
+
+      - name: created_at
+        sql: created_at
+        type: time
+
+    pre_aggregations:
+      - name: orders_by_day
+        measures: [count, total_amount]
+        dimensions: [status]
+        time_dimension: created_at
+        granularity: day
+        partition_granularity: month
+        refresh_key:
+          every: 10 minute

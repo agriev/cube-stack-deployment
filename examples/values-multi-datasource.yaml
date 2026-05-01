@@ -1,0 +1,28 @@
+# Example: multiple data sources (default + warehouse + crm).
+# In schemas reference them with `dataSource: warehouse`, etc.
+datasources:
+  default:
+    type: postgres
+    host: pg-app.default.svc
+    port: 5432
+    database: app
+    user: cube_ro
+    existingSecret: cube-pg-app
+  warehouse:
+    type: snowflake
+    user: CUBE
+    database: ANALYTICS
+    existingSecret: cube-snowflake
+    extraEnv:
+      - name: CUBEJS_DS_WAREHOUSE_DB_SNOWFLAKE_ACCOUNT
+        value: my-account.us-east-1
+      - name: CUBEJS_DS_WAREHOUSE_DB_SNOWFLAKE_WAREHOUSE
+        value: COMPUTE_WH
+  crm:
+    type: bigquery
+    extraEnv:
+      - name: CUBEJS_DS_CRM_DB_BQ_PROJECT_ID
+        value: my-project
+      - name: CUBEJS_DS_CRM_DB_BQ_KEY_FILE
+        value: /etc/cube/bq/credentials.json
+    # Mount BQ credentials via cube.extraEnvFrom or schema.configMap as needed.

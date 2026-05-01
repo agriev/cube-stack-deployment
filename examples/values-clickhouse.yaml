@@ -1,0 +1,23 @@
+# Example: Cube + ClickHouse + GCS export bucket.
+datasources:
+  default:
+    type: clickhouse
+    host: clickhouse.default.svc.cluster.local
+    port: 8123
+    database: analytics
+    user: cube
+    existingSecret: cube-ch
+    passwordKey: password
+    ssl:
+      enabled: false
+    extraEnv:
+      - name: CUBEJS_DB_CLICKHOUSE_READONLY
+        value: "true"
+
+cubestore:
+  remoteStorage:
+    type: gcs
+    gcs:
+      bucket: my-cube-gcs
+      existingSecret: cube-gcp
+      credentialsKey: credentials.json

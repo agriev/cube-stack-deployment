@@ -1,0 +1,33 @@
+{{- if and .Values.cubestore.enabled .Values.cubestore.router.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cubeStack.cubestore.router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+spec:
+  {{- if .Values.cubestore.router.pdb.minAvailable }}
+  minAvailable: {{ .Values.cubestore.router.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.cubestore.router.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 6 }}
+{{- end }}
+{{- if and .Values.cubestore.enabled .Values.cubestore.workers.pdb.enabled (gt (.Values.cubestore.workers.replicas | int) 0) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cubeStack.cubestore.workers.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 4 }}
+spec:
+  {{- if .Values.cubestore.workers.pdb.minAvailable }}
+  minAvailable: {{ .Values.cubestore.workers.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.cubestore.workers.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-workers") | nindent 6 }}
+{{- end }}

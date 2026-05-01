@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+      - 'docker/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'charts/**'
+      - 'docker/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  helm-lint:
+    name: helm lint + template + kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: helm dependency update
+        run: helm dependency update charts/cube-stack
+
+      - name: helm lint (default values)
+        run: helm lint charts/cube-stack
+
+      - name: helm lint (prod overlay)
+        run: |
+          helm lint charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-prod.yaml
+
+      - name: helm lint (dev overlay)
+        run: |
+          helm lint charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-dev.yaml
+
+      - name: helm lint (quickstart overlay)
+        run: |
+          helm lint charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-quickstart.yaml
+
+      - name: helm template (quickstart)
+        run: |
+          mkdir -p _rendered
+          helm template ci charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-quickstart.yaml \
+            --namespace cube --create-namespace > _rendered/quickstart.yaml
+
+      - name: helm template (prod)
+        run: |
+          helm template ci charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-prod.yaml \
+            --namespace cube --create-namespace > _rendered/prod.yaml
+
+      - name: helm template (dev)
+        run: |
+          helm template ci charts/cube-stack \
+            -f charts/cube-stack/values.yaml \
+            -f charts/cube-stack/values-dev.yaml \
+            --namespace cube --create-namespace > _rendered/dev.yaml
+
+      - name: install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz \
+            | tar xzf - -C /usr/local/bin kubeconform
+
+      - name: kubeconform validation (k8s 1.31)
+        run: |
+          for f in _rendered/*.yaml; do
+            echo "→ validating $f"
+            kubeconform -strict -ignore-missing-schemas \
+              -kubernetes-version 1.31.0 \
+              -summary "$f"
+          done
+
+      - name: upload rendered manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-manifests
+          path: _rendered/
+
+  chart-testing:
+    name: chart-testing (lint+install on kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: helm/chart-testing-action@v2.6.1
+
+      - name: ct lint
+        run: ct lint --target-branch main --chart-dirs charts --all
+
+      - name: create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.24.0
+          cluster_name: cube-ci
+
+      - name: ct install (quickstart)
+        run: |
+          ct install \
+            --target-branch main \
+            --chart-dirs charts \
+            --all \
+            --helm-extra-args="--timeout 10m" \
+            --helm-extra-set-args="--values=charts/cube-stack/values-quickstart.yaml"
