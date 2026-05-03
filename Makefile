@@ -144,6 +144,12 @@ ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	    -f cubestore/Dockerfile .
 
 ha-deploy:       ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
+	@if kubectl describe node docker-desktop 2>/dev/null | grep -q "DiskPressure     True"; then \
+	  echo "ERROR: kubectl reports DiskPressure on docker-desktop node. kubelet will evict pods on schedule."; \
+	  echo "       Free disk inside the Docker VM (Settings → Resources → Disk image size, then \"Apply & restart\")"; \
+	  echo "       or run \`docker system prune -a\` (destructive — wipes all Docker artifacts)."; \
+	  exit 1; \
+	fi
 	helm upgrade --install cube-ha $(CHART) \
 	  -f $(CHART)/values.yaml -f $(CHART)/values-ha-test.yaml \
 	  --namespace cube-ha --create-namespace \

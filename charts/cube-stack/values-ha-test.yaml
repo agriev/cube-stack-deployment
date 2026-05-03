@@ -8,6 +8,18 @@
 #     -f charts/cube-stack/values.yaml \
 #     -f charts/cube-stack/values-ha-test.yaml \
 #     -n cube-ha --create-namespace --wait
+#
+# Pre-flight on docker-desktop k8s:
+#   - Allocate ≥ 64 GiB to the Docker Desktop VM disk
+#     (Settings → Resources → Disk image size). The default 47 GiB
+#     can hit kubelet's disk-pressure threshold under modest churn,
+#     and once kubelet sets DiskPressure=True it evicts pods
+#     immediately — even with tolerations.
+#   - Verify `kubectl describe node docker-desktop | grep
+#     DiskPressure` shows `False` before `make ha-deploy`.
+#   - The hostpath StorageClass on docker-desktop's storage-
+#     provisioner is fine; for richer storage classes (NFS, CSI,
+#     etc.) override `cubestore.router.persistence.storageClass`.
 
 quickstart:
   enabled: true  # bypasses datasource validation; we don't run queries
