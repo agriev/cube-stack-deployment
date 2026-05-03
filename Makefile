@@ -133,7 +133,10 @@ kind-deploy: kind-deploy-postgres deps ## Full dev install on kind
 # the fork is at $HOME/workspace/cube; override CUBE_REPO for a
 # different path.
 CUBE_REPO     ?= $(HOME)/workspace/cube
-CUBESTORE_HA_TAG ?= dev
+# Tag prefixed with `v` because the chart's `cubeStack.cubestoreImage`
+# helper auto-prepends `v` to non-v tags. Avoids the "image not found"
+# friction during the first-time `make ha-deploy`.
+CUBESTORE_HA_TAG ?= vdev
 
 .PHONY: ha-image ha-deploy ha-verify ha-down
 

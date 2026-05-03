@@ -47,16 +47,6 @@ Naming convention:
 {{- printf "%s-cubestore-workers-headless" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/*
-HA fork — headless service used as the raft peer DNS source. Created
-only when `cubestore.ha.enabled`; pods get DNS records as
-`<podname>.<this>.<ns>.svc.cluster.local`. Distinct from the
-standard ClusterIP `cubestore-router` service so client-facing
-traffic and replication peer DNS don't share a name.
-*/}}
-{{- define "cubeStack.cubestore.router.raftHeadless" -}}
-{{- printf "%s-cubestore-router-raft" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
 
 {{- define "cubeStack.secrets.fullname" -}}
 {{- printf "%s-secrets" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}

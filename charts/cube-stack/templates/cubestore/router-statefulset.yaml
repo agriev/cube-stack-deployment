@@ -47,6 +47,10 @@ spec:
           # NODE_ID=3 (raft id 0 is reserved). Done in a sh wrapper
           # so we don't need a separate init container; cubestored
           # is then exec'd in PID 1 as usual.
+          #
+          # The fork's Dockerfile lays cubestored at /cube/cubestored
+          # with WORKDIR /cube; we use the absolute path to be robust
+          # against future PATH changes in the base image.
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -54,7 +58,11 @@ spec:
               ord="${POD_NAME##*-}"
               export CUBESTORE_NODE_ID=$((ord + 1))
               echo "[ha-init] POD_NAME=$POD_NAME CUBESTORE_NODE_ID=$CUBESTORE_NODE_ID"
-              exec cubestored
+              if [ -x /cube/cubestored ]; then
+                exec /cube/cubestored
+              else
+                exec cubestored
+              fi
           {{- end }}
           ports:
             - name: meta

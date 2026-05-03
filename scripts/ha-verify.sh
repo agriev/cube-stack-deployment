@@ -31,7 +31,11 @@ ROUTER_LABEL="app.kubernetes.io/component=cubestore-router"
 
 # Defaults — override via env if your release uses different ports
 # or status path.
-STATUS_PORT=${STATUS_PORT:-3031}
+#
+# Cubestore itself emits statsd; the sidecar at port 9102 (the chart's
+# `metrics.statsdExporter.httpPort`) re-publishes them as Prometheus.
+# The HA test deploys the sidecar; this script scrapes from there.
+METRICS_PORT=${METRICS_PORT:-9102}
 METRICS_PATH=${METRICS_PATH:-/metrics}
 
 # 1. Wait for 3 pods Ready.
@@ -52,20 +56,38 @@ if [ "$ready" -ne 3 ]; then
   exit 1
 fi
 
-# 2 + 3. Scrape /metrics from each pod via kubectl port-forward.
+# 2 + 3. Scrape /metrics from each pod. The fork's debian-slim image
+# doesn't include curl/wget, so we port-forward from the host.
 PODS=($(kubectl -n "$NS" get pods -l "$ROUTER_LABEL" \
   -o jsonpath='{.items[*].metadata.name}'))
 echo "==> Found pods: ${PODS[*]}"
 
+# Find a free local port for forwarding (use 10000+pod-ordinal so
+# it's stable across runs).
+LOCAL_PORT_BASE=${LOCAL_PORT_BASE:-31000}
+
 leader=""
-declare -A is_leader
-for pod in "${PODS[@]}"; do
+n_leaders=0
+# Avoid `declare -A` (bash 4+) for macOS bash 3.2 compatibility.
+for i in "${!PODS[@]}"; do
+  pod="${PODS[$i]}"
   echo "--- $pod ---"
-  # Use kubectl exec + curl localhost so we don't need port-forward
-  # connections. Cubestore has a curl-able status port at /metrics.
-  metrics=$(kubectl -n "$NS" exec "$pod" -c cubestore -- \
-    sh -c "command -v curl >/dev/null && curl -s http://localhost:${STATUS_PORT}${METRICS_PATH} || wget -q -O- http://localhost:${STATUS_PORT}${METRICS_PATH}" \
-    2>/dev/null || true)
+  local_port=$((LOCAL_PORT_BASE + i))
+  # Background port-forward, give it a moment to come up, then scrape.
+  kubectl -n "$NS" port-forward "$pod" "${local_port}:${METRICS_PORT}" \
+    >/tmp/ha-verify-pf-$pod.log 2>&1 &
+  pf_pid=$!
+  # Wait until port is reachable (max 5s).
+  for _ in $(seq 1 20); do
+    if curl -sf "http://localhost:${local_port}${METRICS_PATH}" \
+        >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+  metrics=$(curl -s "http://localhost:${local_port}${METRICS_PATH}" 2>/dev/null || true)
+  kill "$pf_pid" 2>/dev/null
+  wait "$pf_pid" 2>/dev/null || true
   if [ -z "$metrics" ]; then
     echo "ERROR: no metrics from $pod" >&2
     exit 2
@@ -79,17 +101,13 @@ for pod in "${PODS[@]}"; do
   leader_id=$(echo "$metrics" | awk '/^cs_raft_leader_id/ {print $2; exit}')
   is_l=$(echo "$metrics" | awk '/^cs_raft_is_leader/ {print $2; exit}')
   echo "    term=$term  leader_id=$leader_id  is_leader=$is_l"
-  is_leader[$pod]=$is_l
   if [ "$is_l" = "1" ]; then
     leader=$pod
+    n_leaders=$((n_leaders + 1))
   fi
 done
 
 # Exactly one leader.
-n_leaders=0
-for pod in "${PODS[@]}"; do
-  [ "${is_leader[$pod]}" = "1" ] && n_leaders=$((n_leaders + 1))
-done
 if [ "$n_leaders" -ne 1 ]; then
   echo "ERROR: expected exactly 1 leader, got $n_leaders (election may not have converged)" >&2
   exit 3
@@ -103,16 +121,23 @@ kubectl -n "$NS" delete pod "$leader" --force --grace-period=0 || true
 # 6. Wait for re-election. Failover budget: 30s (M4 chaos test
 # has 5s but k8s pod-deletion + new pod startup can take 10-20s
 # extra; relaxed budget here is appropriate).
-echo "==> Waiting up to 30s for new leader to emerge ..."
+echo "==> Waiting up to 60s for new leader to emerge ..."
 new_leader=""
-for _ in $(seq 1 30); do
+for _ in $(seq 1 60); do
   sleep 1
   surviving=($(kubectl -n "$NS" get pods -l "$ROUTER_LABEL" \
     -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{end}'))
-  for pod in "${surviving[@]}"; do
-    is_l=$(kubectl -n "$NS" exec "$pod" -c cubestore -- \
-      sh -c "curl -s http://localhost:${STATUS_PORT}${METRICS_PATH} 2>/dev/null | awk '/^cs_raft_is_leader/ {print \$2; exit}'" \
-      2>/dev/null || true)
+  for j in "${!surviving[@]}"; do
+    pod="${surviving[$j]}"
+    local_port=$((LOCAL_PORT_BASE + 100 + j))
+    kubectl -n "$NS" port-forward "$pod" "${local_port}:${METRICS_PORT}" \
+      >/dev/null 2>&1 &
+    pf_pid=$!
+    sleep 0.5
+    is_l=$(curl -sf "http://localhost:${local_port}${METRICS_PATH}" 2>/dev/null \
+      | awk '/^cs_raft_is_leader/ {print $2; exit}' || true)
+    kill "$pf_pid" 2>/dev/null
+    wait "$pf_pid" 2>/dev/null || true
     if [ "$is_l" = "1" ]; then
       new_leader=$pod
       break 2

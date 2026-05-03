@@ -24,11 +24,13 @@
 quickstart:
   enabled: true  # bypasses datasource validation; we don't run queries
 
-# Use the locally-built fork image. `make` builds with
-#   docker build -t cubestore-ha:dev -f cube/rust/cubestore/Dockerfile cube/rust
+# Use the locally-built fork image. `make ha-image` produces
+# `cubestore-ha:vdev`. The chart's `cubeStack.cubestoreImage` helper
+# auto-prepends `v` to non-v tags, so writing `tag: vdev` keeps the
+# rendered image name aligned with what `docker build` produces.
 cubestoreImage:
   repository: cubestore-ha
-  tag: dev
+  tag: vdev
   pullPolicy: IfNotPresent
 
 # Skip everything except the cubestore router. The api, schema source,
@@ -39,8 +41,16 @@ api:
 refreshWorker:
   enabled: false
 
+metrics:
+  # Cubestore emits metrics via statsd; the sidecar converts to a
+  # Prometheus-style /metrics endpoint on port 9102. The HA verifier
+  # scrapes the sidecar to read cs_raft_* gauges.
+  statsdExporter:
+    enabled: true
+
 cubestore:
   enabled: true
+  logLevel: debug   # makes raft transport's send/recv visible
   ha:
     enabled: true
     raftPort: 9100
@@ -54,7 +64,7 @@ cubestore:
     persistence:
       enabled: true
       size: 5Gi
-      storageClass: hostpath  # docker-desktop default
+      storageClass: local-path  # rancher local-path-provisioner
     resources:
       requests:
         cpu: "100m"
@@ -67,10 +77,17 @@ cubestore:
   workers:
     replicas: 0
 
-  # Use shared-pvc for the remote storage so we don't need real S3.
+  # Use the in-cluster minio (deployed by `make ha-deploy` precondition)
+  # as the remote-storage backend. This avoids the RWX requirement that
+  # `shared-pvc` mode imposes — local-path-provisioner only supports
+  # ReadWriteOnce. The minio Service `minio.cube-ha.svc:9000` is brought
+  # up by hand before the helm install (see scripts/ha-verify.sh and
+  # the operational note at the top of this file).
   remoteStorage:
-    type: shared-pvc
-    sharedPvc:
-      mountPath: /cube/.cubestore/remote
-      size: 5Gi
-      storageClass: hostpath
+    type: minio
+    minio:
+      bucket: cubestore
+      endpoint: http://minio.cube-ha.svc:9000
+      region: us-east-1
+      accessKey: minioadmin
+      secretKey: minioadmin
