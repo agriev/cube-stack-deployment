@@ -1,4 +1,13 @@
-{{- if and .Values.cubestore.enabled .Values.cubestore.router.pdb.enabled }}
+{{/*
+Router PDB. When `cubestore.ha.enabled`, override the default to
+`minAvailable: <replicas - 1>` so a voluntary disruption (drain,
+rolling restart) can never reduce the cluster below quorum.
+For 3 replicas this means at most 1 router can be evicted at a
+time → quorum 2/3 always holds.
+*/}}
+{{- $haEnabled := .Values.cubestore.ha.enabled }}
+{{- $routerPdbEnabled := or .Values.cubestore.router.pdb.enabled $haEnabled }}
+{{- if and .Values.cubestore.enabled $routerPdbEnabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -6,7 +15,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
 spec:
-  {{- if .Values.cubestore.router.pdb.minAvailable }}
+  {{- if $haEnabled }}
+  # HA mode: protect quorum. minAvailable = replicas - 1 means at
+  # most one pod down at a time; for 3 replicas that's quorum-safe
+  # (2 of 3) and matches the M4 partition test's tolerance bound.
+  minAvailable: {{ sub (.Values.cubestore.router.replicas | int) 1 }}
+  {{- else if .Values.cubestore.router.pdb.minAvailable }}
   minAvailable: {{ .Values.cubestore.router.pdb.minAvailable }}
   {{- else }}
   maxUnavailable: {{ .Values.cubestore.router.pdb.maxUnavailable }}

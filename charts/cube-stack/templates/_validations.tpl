@@ -59,4 +59,18 @@ The actual call is made from common/_validations-call.yaml.
 {{- if and .Values.cube.sqlAuth.user (not .Values.cube.sqlAuth.password) (not .Values.cube.sqlAuth.existingSecret) -}}
 {{- /* Auto-generates random password — that's fine. */ -}}
 {{- end -}}
+
+{{- /* HA fork — Raft replication requires an odd, ≥3 replica count. */ -}}
+{{- if and .Values.cubestore.enabled .Values.cubestore.ha.enabled -}}
+{{- $replicas := .Values.cubestore.router.replicas | int -}}
+{{- if lt $replicas 3 -}}
+{{- fail (printf "cubestore.ha.enabled=true requires cubestore.router.replicas >= 3 (got %d). Raft quorum is (N/2)+1 — 1 or 2 replicas can't survive a single failure." $replicas) -}}
+{{- end -}}
+{{- if eq (mod $replicas 2) 0 -}}
+{{- fail (printf "cubestore.ha.enabled=true requires an ODD cubestore.router.replicas (got %d). Even replica counts let half-and-half partitions block writes indefinitely." $replicas) -}}
+{{- end -}}
+{{- if not .Values.cubestore.router.persistence.enabled -}}
+{{- fail "cubestore.ha.enabled=true requires cubestore.router.persistence.enabled=true. Raft log durability depends on a stable PVC; emptyDir would lose committed entries on pod restart." -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}

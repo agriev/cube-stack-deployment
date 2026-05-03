@@ -41,6 +41,21 @@ spec:
           image: {{ include "cubeStack.cubestoreImage" . | quote }}
           imagePullPolicy: {{ .Values.cubestoreImage.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- if .Values.cubestore.ha.enabled }}
+          # HA fork — derive CUBESTORE_NODE_ID from the StatefulSet
+          # pod ordinal at startup. Pod `<rel>-cubestore-router-2` →
+          # NODE_ID=3 (raft id 0 is reserved). Done in a sh wrapper
+          # so we don't need a separate init container; cubestored
+          # is then exec'd in PID 1 as usual.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              ord="${POD_NAME##*-}"
+              export CUBESTORE_NODE_ID=$((ord + 1))
+              echo "[ha-init] POD_NAME=$POD_NAME CUBESTORE_NODE_ID=$CUBESTORE_NODE_ID"
+              exec cubestored
+          {{- end }}
           ports:
             - name: meta
               containerPort: {{ .Values.cubestore.metaPort }}
@@ -54,6 +69,11 @@ spec:
             - name: status
               containerPort: {{ .Values.cubestore.statusPort }}
               protocol: TCP
+            {{- if .Values.cubestore.ha.enabled }}
+            - name: raft
+              containerPort: {{ .Values.cubestore.ha.raftPort }}
+              protocol: TCP
+            {{- end }}
           env:
             - name: CUBESTORE_SERVER_NAME
               value: {{ printf "%s:%d" (include "cubeStack.cubestore.router.fullname" .) (.Values.cubestore.metaPort | int) | quote }}
@@ -67,6 +87,7 @@ spec:
               value: {{ .Values.cubestore.statusPort | quote }}
             {{- include "cubeStack.cubestoreEnv" . | nindent 12 }}
             {{- include "cubeStack.cubestore.workersEnv" . | nindent 12 }}
+            {{- include "cubeStack.cubestore.haEnv" . | nindent 12 }}
             {{- with .Values.cubestore.router.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
           {{- with .Values.cubestore.extraEnvFrom }}
           envFrom:

@@ -124,3 +124,54 @@ Workers list (FQDN form) emitted as CUBESTORE_WORKERS env var.
   value: {{ include "cubeStack.cubestore.workerAddrs" . | quote }}
 {{- end }}
 {{- end -}}
+
+{{/*
+HA fork — Raft env vars emitted on the router pod when ha.enabled.
+
+CUBESTORE_NODE_ID is derived from the StatefulSet pod ordinal. We
+read POD_NAME via the downward API and extract the trailing integer
+in a sh wrapper around the cubestored binary (see the StatefulSet's
+command: block). Pod ordinal `cubestore-router-0` → NODE_ID=1, `-1`
+→ 2, `-2` → 3.
+
+CUBESTORE_RAFT_PEERS is a static list emitted at template-render
+time from `replicas` and the headless service DNS. Every replica
+gets the SAME list, including itself — that's the contract the
+binary boot path checks.
+*/}}
+{{- define "cubeStack.cubestore.haEnv" -}}
+{{- if .Values.cubestore.ha.enabled -}}
+- name: CUBESTORE_HA_MODE
+  value: "raft"
+- name: CUBESTORE_RAFT_PORT
+  value: {{ .Values.cubestore.ha.raftPort | quote }}
+- name: CUBESTORE_RAFT_PEERS
+  value: {{ include "cubeStack.cubestore.raftPeers" . | quote }}
+{{- if .Values.cubestore.ha.raftLogDir }}
+- name: CUBESTORE_HA_RAFT_LOG_DIR
+  value: {{ .Values.cubestore.ha.raftLogDir | quote }}
+{{- end }}
+- name: POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+{{- end -}}
+{{- end -}}
+
+{{/*
+Comma-separated raft peer list: `<id>@<podname>.<headless-svc>:<port>`.
+Pod ordinal i (0-indexed) → raft id (i+1). Reserved 0 is raft-rs's
+"no peer" sentinel; the parser in agriev/cube refuses it explicitly.
+*/}}
+{{- define "cubeStack.cubestore.raftPeers" -}}
+{{- $base := include "cubeStack.cubestore.router.fullname" . -}}
+{{- $headless := include "cubeStack.cubestore.router.raftHeadless" . -}}
+{{- $port := .Values.cubestore.ha.raftPort | int -}}
+{{- $count := .Values.cubestore.router.replicas | int -}}
+{{- $list := list -}}
+{{- range $i := until $count -}}
+{{- $id := add $i 1 -}}
+{{- $list = append $list (printf "%d@%s-%d.%s:%d" $id $base $i $headless $port) -}}
+{{- end -}}
+{{- join "," $list -}}
+{{- end -}}

@@ -1,0 +1,38 @@
+{{- if and .Values.cubestore.enabled .Values.cubestore.ha.enabled }}
+{{/*
+HA fork — headless service that gives each router pod a stable
+per-pod DNS record under `<podname>.<this-svc>.<ns>.svc.cluster.local`.
+The raft peer list (CUBESTORE_RAFT_PEERS) is built off this name.
+
+Headless = `clusterIP: None`; selector matches pod labels; one A
+record per ready pod. Stays headless even when only one of the
+replicas is ready — that's what raft-rs needs during a rolling
+restart, where the surviving 2/3 replicas keep talking to each
+other while the rotated one comes back up.
+
+Distinct from `cubestore-router` (the ClusterIP service for
+client-facing traffic): the meta/http/mysql/status ports stay on
+the existing service; this one carries ONLY the raft port.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeStack.cubestore.router.raftHeadless" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  # publishNotReadyAddresses lets a starting-up replica appear in
+  # peers' DNS before its readinessProbe passes — necessary for the
+  # raft handshake to complete on a fresh boot. raft-rs handles a
+  # peer that's still electing internally.
+  publishNotReadyAddresses: true
+  selector: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+  ports:
+    - name: raft
+      port: {{ .Values.cubestore.ha.raftPort }}
+      targetPort: raft
+      protocol: TCP
+{{- end }}

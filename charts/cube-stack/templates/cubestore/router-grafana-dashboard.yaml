@@ -1,0 +1,32 @@
+{{- if and .Values.cubestore.enabled .Values.cubestore.ha.enabled .Values.cubestore.ha.dashboard.enabled }}
+{{/*
+HA fork — Grafana dashboard ConfigMap for the `cs.raft.*` operator
+metrics (term, leader_id, commit/applied indices, leader_changes,
+proposes/sec, apply latency).
+
+Discovery model: a Grafana sidecar (kube-prometheus-stack's
+grafana-dashboards-loader, the Grafana Operator's Dashboard CR
+sourcing from ConfigMap, etc.) watches for ConfigMaps with a
+specific label and auto-loads the embedded JSON. The default
+label `grafana_dashboard: "1"` matches kube-prometheus-stack;
+override `cubestore.ha.dashboard.labels` to match your sidecar.
+
+The dashboard JSON itself ships at
+`charts/cube-stack/dashboards/raft-cluster.json`, kept in sync
+with the canonical copy at
+`agriev/cube/docs/ha/grafana/raft-cluster.json`.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cubeStack.cubestore.router.fullname" . }}-raft-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+    {{- with .Values.cubestore.ha.dashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  raft-cluster.json: |-
+    {{- .Files.Get "dashboards/raft-cluster.json" | nindent 4 }}
+{{- end }}
