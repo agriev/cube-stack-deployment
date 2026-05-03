@@ -134,7 +134,7 @@ and [environment variable reference](https://cube.dev/docs/product/configuration
 
 ### Infrastructure
 
-- [ ] Cube Store **cluster mode** (`cubestore.workers.replicas ≥ 2`). OSS Cube Store **does not replicate** — losing the router or any worker downs the cluster, so cluster mode is about throughput, not HA.
+- [ ] Cube Store **cluster mode** (`cubestore.workers.replicas ≥ 2`). OSS Cube Store **does not replicate** — losing the router or any worker downs the cluster, so cluster mode is about throughput, not HA. (For genuine router HA, see [HA mode](#cube-store-ha-mode-experimental) below.)
 - [ ] Cube Store remote storage on **S3 or GCS** (not MinIO — community-supported, no consistency guarantees per Cube docs).
 - [ ] Cube Store **export bucket ≠ persistent bucket** (`datasources.<n>.export.bucket` and `cubestore.remoteStorage.s3.bucket` MUST differ).
 - [ ] Cube Store **isolated network** — no NetworkPolicy ingress from outside the cube namespace; Cube Store has no auth of its own.
@@ -171,6 +171,51 @@ and [environment variable reference](https://cube.dev/docs/product/configuration
 - [ ] `metrics.statsdExporter.enabled: true` (Cube Store StatsD → Prometheus).
 - [ ] `metrics.serviceMonitor.enabled: true` for the Prometheus Operator.
 - [ ] Track key SLIs: `cubejs_pre_aggregation_build_duration`, refresh worker queue depth, Cube Store query timeouts.
+
+---
+
+## Cube Store HA mode (experimental)
+
+Upstream OSS Cube Store has a single-router single-point-of-failure: all
+metadata lives in one RocksDB instance, and pod loss makes the cluster
+unqueryable until k8s reschedules and re-attaches the PVC. The
+[`agriev/cube`](https://github.com/agriev/cube) fork adds embedded Raft
+replication (no external coordinator) to the router. This chart wires that
+fork in via `cubestore.ha.enabled=true`.
+
+```bash
+# Build the fork's image
+make ha-image                         # → cubestore-ha:vdev
+
+# Deploy a 3-router HA cluster (namespace cube-ha)
+make ha-deploy
+
+# Verify single-cycle failover (kill leader → new leader)
+make ha-verify
+
+# Multi-cycle chaos (3 rounds; recovers in ~6–10 s per round)
+make ha-chaos
+```
+
+What flips when `cubestore.ha.enabled=true`:
+
+- `replicas: 3` enforced (chart fails install on `< 3` or even values).
+- Per-pod headless DNS via the StatefulSet `serviceName`.
+- `CUBESTORE_NODE_ID` derived from pod ordinal in an init wrapper.
+- `CUBESTORE_RAFT_PEERS` rendered from the replica count.
+- PDB `minAvailable = replicas - 1` (quorum protection).
+- Raft port `9100` opened.
+
+Production caveats:
+
+- Workers are unchanged — partition replication is Phase 2 in the fork.
+- Reads route to the leader; followers don't serve queries in v1.
+- The fork rebases on upstream Cube quarterly; pin both `image.tag` and
+  `cubestoreImage.tag` to the same release.
+
+See the fork's [`HA.md`](https://github.com/agriev/cube/blob/ha-main/HA.md)
+and [migration guide](https://github.com/agriev/cube/blob/ha-main/docs/ha/MIGRATION.md)
+for protocol details.
 
 ---
 

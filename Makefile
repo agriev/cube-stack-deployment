@@ -138,7 +138,7 @@ CUBE_REPO     ?= $(HOME)/workspace/cube
 # friction during the first-time `make ha-deploy`.
 CUBESTORE_HA_TAG ?= vdev
 
-.PHONY: ha-image ha-deploy ha-verify ha-chaos ha-down
+.PHONY: ha-image ha-deploy ha-verify ha-chaos ha-down ha-reset
 
 ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	cd $(CUBE_REPO)/rust && \
@@ -167,6 +167,13 @@ ha-chaos:        ## Repeated kill-leader chaos test (5 rounds; override ROUNDS=N
 ha-down:         ## Tear down the HA test deployment + namespace
 	helm uninstall cube-ha -n cube-ha 2>/dev/null || true
 	kubectl delete namespace cube-ha --ignore-not-found
+
+ha-reset:        ## Clean re-deploy: uninstall + drop PVCs (stale ConfState) + reinstall
+	-helm uninstall cube-ha -n cube-ha 2>/dev/null
+	@sleep 3
+	-kubectl -n cube-ha delete pvc -l app.kubernetes.io/component=cubestore-router
+	@sleep 3
+	$(MAKE) ha-deploy
 
 ##@ Helpers
 
