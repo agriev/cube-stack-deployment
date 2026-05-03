@@ -1,0 +1,64 @@
+# values-ha-test.yaml — minimal overlay for verifying the HA fork's
+# router cluster on a local docker-desktop k8s. Brings up ONLY the
+# cubestore router StatefulSet (no api, no workers, no refresh-worker)
+# so the test focuses on the M4 / M5 / M6 / M7 wiring.
+#
+# Apply with:
+#   helm upgrade --install cube-ha charts/cube-stack \
+#     -f charts/cube-stack/values.yaml \
+#     -f charts/cube-stack/values-ha-test.yaml \
+#     -n cube-ha --create-namespace --wait
+
+quickstart:
+  enabled: true  # bypasses datasource validation; we don't run queries
+
+# Use the locally-built fork image. `make` builds with
+#   docker build -t cubestore-ha:dev -f cube/rust/cubestore/Dockerfile cube/rust
+cubestoreImage:
+  repository: cubestore-ha
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# Skip everything except the cubestore router. The api, schema source,
+# and refresh-worker components aren't relevant for verifying the raft
+# cluster forms.
+api:
+  enabled: false
+refreshWorker:
+  enabled: false
+
+cubestore:
+  enabled: true
+  ha:
+    enabled: true
+    raftPort: 9100
+    dashboard:
+      enabled: false  # Grafana isn't deployed in this test harness
+
+  # 3 router replicas for raft quorum. Storage on the default
+  # docker-desktop StorageClass (hostpath).
+  router:
+    replicas: 3
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: hostpath  # docker-desktop default
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+
+  # No workers in this test; raft is purely about the routers.
+  workers:
+    replicas: 0
+
+  # Use shared-pvc for the remote storage so we don't need real S3.
+  remoteStorage:
+    type: shared-pvc
+    sharedPvc:
+      mountPath: /cube/.cubestore/remote
+      size: 5Gi
+      storageClass: hostpath

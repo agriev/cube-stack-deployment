@@ -127,6 +127,35 @@ kind-deploy: kind-deploy-postgres deps ## Full dev install on kind
 	  --namespace $(NAMESPACE) --create-namespace \
 	  --wait --timeout 10m
 
+##@ HA fork — Cube Store with Raft replication
+
+# Build the agriev/cube fork's cubestored image. Defaults assume
+# the fork is at $HOME/workspace/cube; override CUBE_REPO for a
+# different path.
+CUBE_REPO     ?= $(HOME)/workspace/cube
+CUBESTORE_HA_TAG ?= dev
+
+.PHONY: ha-image ha-deploy ha-verify ha-down
+
+ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
+	cd $(CUBE_REPO)/rust && \
+	  docker build -t cubestore-ha:$(CUBESTORE_HA_TAG) \
+	    --build-arg WITH_AVX2=0 \
+	    -f cubestore/Dockerfile .
+
+ha-deploy:       ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
+	helm upgrade --install cube-ha $(CHART) \
+	  -f $(CHART)/values.yaml -f $(CHART)/values-ha-test.yaml \
+	  --namespace cube-ha --create-namespace \
+	  --wait --timeout 5m
+
+ha-verify:       ## Smoke-test the HA cluster (election + failover)
+	NS=cube-ha REL=cube-ha scripts/ha-verify.sh
+
+ha-down:         ## Tear down the HA test deployment + namespace
+	helm uninstall cube-ha -n cube-ha 2>/dev/null || true
+	kubectl delete namespace cube-ha --ignore-not-found
+
 ##@ Helpers
 
 .PHONY: help
