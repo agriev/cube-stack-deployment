@@ -138,7 +138,7 @@ CUBE_REPO     ?= $(HOME)/workspace/cube
 # friction during the first-time `make ha-deploy`.
 CUBESTORE_HA_TAG ?= vdev
 
-.PHONY: ha-image ha-deploy ha-verify ha-down
+.PHONY: ha-image ha-deploy ha-verify ha-chaos ha-down
 
 ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	cd $(CUBE_REPO)/rust && \
@@ -160,6 +160,9 @@ ha-deploy:       ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
 
 ha-verify:       ## Smoke-test the HA cluster (election + failover)
 	NS=cube-ha REL=cube-ha scripts/ha-verify.sh
+
+ha-chaos:        ## Repeated kill-leader chaos test (5 rounds; override ROUNDS=N)
+	NS=cube-ha scripts/ha-chaos.sh
 
 ha-down:         ## Tear down the HA test deployment + namespace
 	helm uninstall cube-ha -n cube-ha 2>/dev/null || true
