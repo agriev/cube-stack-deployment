@@ -1,0 +1,74 @@
+# In-cluster MinIO for local HA testing only. Brought up by
+# scripts/lib/setup-minio.sh before `make ha-deploy` so the chart's
+# `cubestore.remoteStorage.type=minio` endpoint resolves.
+#
+# Single-pod MinIO running on emptyDir — explicitly throwaway. NOT a
+# template for prod. For real S3 backups, point cubestore.remoteStorage
+# at AWS / GCS / a managed MinIO.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cube-ha
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio
+  namespace: cube-ha
+  labels:
+    app: minio
+spec:
+  containers:
+    - name: minio
+      image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+      args:
+        - server
+        - /data
+        - --console-address
+        - ":9001"
+      env:
+        - name: MINIO_ROOT_USER
+          value: minioadmin
+        - name: MINIO_ROOT_PASSWORD
+          value: minioadmin
+      ports:
+        - containerPort: 9000
+          name: api
+        - containerPort: 9001
+          name: console
+      readinessProbe:
+        httpGet:
+          path: /minio/health/ready
+          port: api
+        initialDelaySeconds: 5
+        periodSeconds: 5
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+  volumes:
+    - name: data
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: cube-ha
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console

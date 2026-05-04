@@ -96,6 +96,14 @@ jobs:
 
       - uses: helm/chart-testing-action@v2.6.1
 
+      - name: add helm repos for chart deps
+        # Both cube-stack and cube-stack-ha depend on bitnami/redis. ct
+        # install runs `helm dep build` which needs the repo registered
+        # in helm's repo cache, even when the lock file pins a version.
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
       - name: ct lint
         # cube-stack-common is a Helm library chart — has no installable
         # resources and no values surface, so ct's "render with default

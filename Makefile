@@ -150,7 +150,7 @@ CUBE_REPO     ?= $(HOME)/workspace/cube
 # friction during the first-time `make ha-deploy`.
 CUBESTORE_HA_TAG ?= vdev
 
-.PHONY: ha-image ha-deploy ha-verify ha-chaos ha-down ha-reset
+.PHONY: ha-image ha-minio ha-deploy ha-verify ha-chaos ha-down ha-reset
 
 ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	cd $(CUBE_REPO)/rust && \
@@ -158,7 +158,10 @@ ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	    --build-arg WITH_AVX2=0 \
 	    -f cubestore/Dockerfile .
 
-ha-deploy: deps-all ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
+ha-minio:        ## Bring up an in-cluster MinIO + create the cubestore bucket
+	NS=cube-ha BUCKET=cubestore scripts/lib/setup-minio.sh
+
+ha-deploy: deps-all ha-minio ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
 	@if kubectl describe node docker-desktop 2>/dev/null | grep -q "DiskPressure     True"; then \
 	  echo "ERROR: kubectl reports DiskPressure on docker-desktop node. kubelet will evict pods on schedule."; \
 	  echo "       Free disk inside the Docker VM (Settings → Resources → Disk image size, then \"Apply & restart\")"; \

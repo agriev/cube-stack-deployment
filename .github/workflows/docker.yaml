@@ -20,7 +20,8 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write   # for OIDC keyless cosign signing
+  id-token: write          # for OIDC keyless cosign signing
+  security-events: write   # for upload-sarif (Trivy results into the Security tab)
 
 env:
   REGISTRY: ghcr.io
