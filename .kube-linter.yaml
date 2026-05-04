@@ -19,6 +19,9 @@ checks:
     # router StatefulSet (PR-2 / A1); api + worker remain configurable.
     - "no-anti-affinity"
 
-  # Run all the standard checks the kube-linter team curates, except the
-  # excludes above.
-  addAllBuiltIn: true
+  # Run only the default check set. addAllBuiltIn would also fire
+  # very picky stylistic checks (sorted-keys, required-annotation-email,
+  # required-label-owner, dnsconfig-options, etc.) that aren't actionable
+  # without an org-wide policy. Default checks cover the actually
+  # security-relevant stuff (privileged containers, latest tags,
+  # missing limits, etc.) without the noise.

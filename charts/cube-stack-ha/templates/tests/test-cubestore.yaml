@@ -10,10 +10,19 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  securityContext: {{- toYaml .Values.podSecurityContext | nindent 4 }}
   containers:
     - name: curl
       image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
       imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      securityContext: {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      resources:
+        requests:
+          cpu: 50m
+          memory: 32Mi
+        limits:
+          cpu: 200m
+          memory: 64Mi
       command:
         - /bin/sh
         - -c
