@@ -80,6 +80,17 @@ jobs:
         with:
           cosign-release: v2.4.1
 
+      # `helm registry login` only registers credentials with helm; cosign
+      # reads from Docker's credential store. Without docker login, the
+      # cosign sign step fails with "UNAUTHORIZED" pushing the signature
+      # blob to ghcr.io.
+      - name: log in to GHCR for cosign
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: sign chart (OCI keyless)
         env:
           COSIGN_EXPERIMENTAL: "1"
