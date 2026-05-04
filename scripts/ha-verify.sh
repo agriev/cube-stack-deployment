@@ -56,6 +56,22 @@ if [ "$ready" -ne 3 ]; then
   exit 1
 fi
 
+# 1b. Verify the headless Raft service has 3 endpoints. Without this,
+# the Raft transport can't resolve peer pods and election won't even
+# start. The headless service is `<rel>-cubestore-router-headless` and
+# is created by router-service-headless.yaml in cube-stack-ha.
+HEADLESS="${REL}-cube-stack-ha-cubestore-router-headless"
+echo "==> Verifying headless service ${HEADLESS} has 3 endpoints…"
+ep_count=$(kubectl -n "$NS" get endpoints "$HEADLESS" \
+  -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null \
+  | tr ' ' '\n' | grep -c . || true)
+if [ "$ep_count" -ne 3 ]; then
+  echo "ERROR: headless service $HEADLESS has $ep_count endpoints, expected 3" >&2
+  kubectl -n "$NS" describe endpoints "$HEADLESS" || true
+  exit 1
+fi
+echo "    3 endpoints ✓"
+
 # 2 + 3. Scrape /metrics from each pod. The fork's debian-slim image
 # doesn't include curl/wget, so we port-forward from the host.
 PODS=($(kubectl -n "$NS" get pods -l "$ROUTER_LABEL" \

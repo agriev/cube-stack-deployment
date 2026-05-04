@@ -159,25 +159,26 @@ binary boot path checks.
 {{- end -}}
 
 {{/*
-Comma-separated raft peer list: `<id>@<podname>.<svc>:<port>`.
+Comma-separated raft peer list: `<id>@<podname>.<headless-svc>:<port>`.
 Pod ordinal i (0-indexed) → raft id (i+1). Reserved 0 is raft-rs's
 "no peer" sentinel; the parser in agriev/cube refuses it explicitly.
 
-The DNS name is resolved via the StatefulSet's serviceName — the
-main router service. Kubernetes emits per-pod A records under
-`<podname>.<serviceName>.<ns>.svc.cluster.local` for any service
-referenced as a StatefulSet's serviceName, even when it's
-ClusterIP rather than headless. This avoids the need for a
-separate headless service just for raft peer DNS.
+The DNS name is resolved via the dedicated headless service
+`<rel>-cubestore-router-headless` (clusterIP: None,
+publishNotReadyAddresses: true). Kubernetes emits per-pod A records
+at `<podname>.<headless>.<ns>.svc.cluster.local`. The headless
+service is purpose-built for Raft peer discovery; client traffic
+keeps going to the regular ClusterIP `router-service`.
 */}}
 {{- define "cubeStack.cubestore.raftPeers" -}}
 {{- $base := include "cubeStack.cubestore.router.fullname" . -}}
+{{- $headless := include "cubeStack.cubestore.router.headless" . -}}
 {{- $port := .Values.cubestore.ha.raftPort | int -}}
 {{- $count := .Values.cubestore.router.replicas | int -}}
 {{- $list := list -}}
 {{- range $i := until $count -}}
 {{- $id := add $i 1 -}}
-{{- $list = append $list (printf "%d@%s-%d.%s:%d" $id $base $i $base $port) -}}
+{{- $list = append $list (printf "%d@%s-%d.%s:%d" $id $base $i $headless $port) -}}
 {{- end -}}
 {{- join "," $list -}}
 {{- end -}}

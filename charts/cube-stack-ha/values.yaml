@@ -472,6 +472,23 @@ cubestore:
       labels:
         grafana_dashboard: "1"
 
+  # ---- Pod anti-affinity for the router StatefulSet ----------------------
+  # Spreads the 3 routers across distinct nodes so a single-node failure
+  # (kubelet OOM, cordon, kernel panic) can't take down 2 of 3 replicas
+  # at once and break Raft quorum.
+  #
+  # `type: required`  — strict scheduling constraint, recommended for
+  #                     multi-node prod clusters.
+  # `type: preferred` — soft scheduling preference; degrades to a single
+  #                     node when nothing else is available (kind,
+  #                     docker-desktop, single-node clusters).
+  # `type: ""` (or `enabled: false`) — disable; user can supply a full
+  #                     custom block via `cubestore.router.affinity`.
+  antiAffinity:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
+    type: required
+
   router:
     # 3 routers form a Raft quorum that survives one pod loss. 5 routers
     # survive two; an even count would let a half-and-half partition

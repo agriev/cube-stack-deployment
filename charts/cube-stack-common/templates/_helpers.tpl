@@ -47,6 +47,10 @@ Naming convention:
 {{- printf "%s-cubestore-workers-headless" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "cubeStack.cubestore.router.headless" -}}
+{{- printf "%s-cubestore-router-headless" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 
 {{- define "cubeStack.secrets.fullname" -}}
 {{- printf "%s-secrets" (include "cubeStack.fullname" .) | trunc 63 | trimSuffix "-" -}}

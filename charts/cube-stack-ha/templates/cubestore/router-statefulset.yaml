@@ -7,7 +7,12 @@ metadata:
   labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
   {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
 spec:
-  serviceName: {{ include "cubeStack.cubestore.router.fullname" . }}
+  # Headless service is the StatefulSet's serviceName so kubelet emits
+  # per-pod A records (<pod>.<headless>.<ns>.svc.cluster.local) — the
+  # Raft transport's contract is that every peer is reachable at a
+  # stable DNS name. The regular ClusterIP service stays for client
+  # traffic (meta/http/mysql/status).
+  serviceName: {{ include "cubeStack.cubestore.router.headless" . }}
   replicas: {{ .Values.cubestore.router.replicas }}
   podManagementPolicy: Parallel
   updateStrategy:
@@ -168,8 +173,10 @@ spec:
       {{- with .Values.cubestore.router.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.cubestore.router.affinity }}
-      affinity: {{- toYaml . | nindent 8 }}
+      {{- $aff := include "cubeStack.cubestore.router.affinity" . }}
+      {{- if trim $aff }}
+      affinity:
+        {{- $aff | nindent 8 }}
       {{- end }}
       {{- $tsc := include "cubeStack.topologySpread" (dict "ctx" . "component" "cubestore-router" "user" .Values.cubestore.router.topologySpreadConstraints) }}
       {{- if trim $tsc }}

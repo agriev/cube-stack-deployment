@@ -1,0 +1,35 @@
+{{/*
+Dedicated headless service for Cube Store router Raft peer discovery.
+
+A StatefulSet's `serviceName:` must reference a headless service for
+Kubernetes to emit per-pod A records (`<pod>.<svc>.<ns>.svc.cluster.local`),
+which is what the Raft transport relies on for stable peer addresses.
+
+This is separate from `router-service.yaml` (ClusterIP) — that one is
+for Cube API → router client traffic and load-balances across pods.
+We don't want client traffic going to a not-ready router, but Raft
+*does* want to talk to its peers as soon as they have an IP, so this
+service publishes not-ready addresses too.
+
+Only the raft port is exposed here; meta/http/mysql/status are
+intentionally NOT here so a stale CoreDNS cache can never accidentally
+route client traffic to a not-ready pod.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeStack.cubestore.router.headless" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: raft
+      port: {{ .Values.cubestore.ha.raftPort }}
+      targetPort: raft
+      protocol: TCP
+  selector:
+    {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "cubestore-router") | nindent 4 }}

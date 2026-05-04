@@ -57,6 +57,12 @@ cubestore:
     dashboard:
       enabled: false  # Grafana isn't deployed in this test harness
 
+  # docker-desktop / kind has a single node, so soft-spread.
+  # On real prod use the chart default (type: required).
+  antiAffinity:
+    enabled: true
+    type: preferred
+
   # 3 router replicas for raft quorum. Storage on the default
   # docker-desktop StorageClass (hostpath).
   router:
