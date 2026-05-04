@@ -1,0 +1,48 @@
+# Example: Cube + Redshift + S3 export bucket.
+#
+# Combine with either chart's values.yaml:
+#   helm install cube     charts/cube-stack    -f charts/cube-stack/values.yaml    -f examples/values-redshift.yaml
+#   helm install cube-ha  charts/cube-stack-ha -f charts/cube-stack-ha/values.yaml -f examples/values-redshift.yaml
+#
+# Pre-flight:
+#
+#   kubectl create namespace cube --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n cube create secret generic cube-redshift \
+#     --from-literal=password='REDSHIFT_PASSWORD'
+#   kubectl -n cube create secret generic cube-aws \
+#     --from-literal=access-key-id='AKIA...' \
+#     --from-literal=secret-access-key='...'
+
+datasources:
+  default:
+    type: redshift
+    host: my-cluster.abc.us-east-1.redshift.amazonaws.com
+    port: 5439
+    database: analytics
+    user: cube_user
+    existingSecret: cube-redshift
+    passwordKey: password
+    ssl:
+      enabled: true
+      rejectUnauthorized: true
+    # Redshift export-via-S3 (UNLOAD) — Cube uses these to materialize
+    # large pre-aggregations directly into S3 instead of streaming
+    # results back through the API.
+    export:
+      bucket: s3://my-cube-export
+      type: s3
+      region: us-east-1
+      aws:
+        existingSecret: cube-aws
+        keyKey: access-key-id
+        secretKey: secret-access-key
+
+cubestore:
+  remoteStorage:
+    type: s3
+    s3:
+      bucket: my-cube-prod
+      region: us-east-1
+      existingSecret: cube-aws
+      accessKeyKey: access-key-id
+      secretKeyKey: secret-access-key

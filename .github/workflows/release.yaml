@@ -95,3 +95,59 @@ jobs:
         with:
           generate_release_notes: true
           files: _packages/*.tgz
+
+  verify-chart:
+    name: cosign verify (post-publish)
+    needs: release-chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - name: parse tag → chart name + version
+        id: tag
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          if [[ "$tag" == cube-stack-ha-v* ]]; then
+            echo "chart=cube-stack-ha" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#cube-stack-ha-v}" >> "$GITHUB_OUTPUT"
+          elif [[ "$tag" == cube-stack-v* ]]; then
+            echo "chart=cube-stack" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#cube-stack-v}" >> "$GITHUB_OUTPUT"
+          elif [[ "$tag" == chart-v* ]]; then
+            echo "chart=cube-stack" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#chart-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1
+
+      - name: cosign verify (with retry for ghcr propagation)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          ref="ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}"
+          identity_regex="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yaml@.*"
+          # Retry up to 30s; ghcr OCI manifest sometimes takes a moment
+          # to propagate after `helm push`.
+          for i in $(seq 1 6); do
+            if cosign verify \
+                --certificate-identity-regexp="$identity_regex" \
+                --certificate-oidc-issuer-regexp='https://token\.actions\.githubusercontent\.com' \
+                "$ref" >/dev/null 2>&1; then
+              echo "✓ cosign verify passed for $ref"
+              exit 0
+            fi
+            echo "attempt $i/6: not yet; sleeping 5s"
+            sleep 5
+          done
+          echo "::error::cosign verify failed for $ref after 30s"
+          cosign verify \
+            --certificate-identity-regexp="$identity_regex" \
+            --certificate-oidc-issuer-regexp='https://token\.actions\.githubusercontent\.com' \
+            "$ref"
+          exit 1

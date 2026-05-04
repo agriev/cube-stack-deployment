@@ -1,0 +1,56 @@
+# Example: Cube + BigQuery + GCS export bucket.
+#
+# Combine with either chart's values.yaml:
+#   helm install cube     charts/cube-stack    -f charts/cube-stack/values.yaml    -f examples/values-bigquery.yaml
+#   helm install cube-ha  charts/cube-stack-ha -f charts/cube-stack-ha/values.yaml -f examples/values-bigquery.yaml
+#
+# Pre-flight (do this once, BEFORE helm install):
+#
+#   kubectl create namespace cube --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n cube create secret generic cube-bigquery \
+#     --from-file=credentials.json=/path/to/your-bigquery-sa.json
+#   kubectl -n cube create secret generic cube-gcs \
+#     --from-file=credentials.json=/path/to/your-gcs-sa.json
+#
+# The service account in `cube-bigquery` needs at least the
+# BigQuery Job User and BigQuery Data Viewer roles. The one in
+# `cube-gcs` needs Storage Object Admin on the export bucket.
+
+datasources:
+  default:
+    type: bigquery
+    # CUBEJS_DB_BQ_PROJECT_ID
+    extraEnv:
+      - name: CUBEJS_DB_BQ_PROJECT_ID
+        value: my-gcp-project
+      - name: CUBEJS_DB_BQ_KEY_FILE
+        value: /etc/cubejs/bq/credentials.json
+
+# Mount the BigQuery service-account JSON into both Cube API and refresh-worker pods.
+api:
+  extraVolumes:
+    - name: bq-creds
+      secret:
+        secretName: cube-bigquery
+  extraVolumeMounts:
+    - name: bq-creds
+      mountPath: /etc/cubejs/bq
+      readOnly: true
+
+refreshWorker:
+  extraVolumes:
+    - name: bq-creds
+      secret:
+        secretName: cube-bigquery
+  extraVolumeMounts:
+    - name: bq-creds
+      mountPath: /etc/cubejs/bq
+      readOnly: true
+
+cubestore:
+  remoteStorage:
+    type: gcs
+    gcs:
+      bucket: my-cube-prod
+      existingSecret: cube-gcs
+      credentialsKey: credentials.json

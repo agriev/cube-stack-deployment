@@ -1,0 +1,38 @@
+# Example: Cube + MySQL + S3 export bucket.
+#
+# Combine with either chart's values.yaml:
+#   helm install cube     charts/cube-stack    -f charts/cube-stack/values.yaml    -f examples/values-mysql.yaml
+#   helm install cube-ha  charts/cube-stack-ha -f charts/cube-stack-ha/values.yaml -f examples/values-mysql.yaml
+#
+# Pre-flight:
+#
+#   kubectl create namespace cube --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n cube create secret generic cube-mysql \
+#     --from-literal=password='MYSQL_PASSWORD'
+
+datasources:
+  default:
+    type: mysql
+    host: mysql.example.com
+    port: 3306
+    database: analytics
+    user: cube_user
+    existingSecret: cube-mysql
+    passwordKey: password
+    ssl:
+      enabled: true
+      rejectUnauthorized: true
+      # If the server uses a custom CA, mount it via api.extraVolumes
+      # and reference the path here:
+      # ca: /etc/cubejs/ssl/ca.pem
+    maxPool: 25
+
+cubestore:
+  remoteStorage:
+    type: s3
+    s3:
+      bucket: my-cube-prod
+      region: us-east-1
+      existingSecret: cube-aws
+      accessKeyKey: access-key-id
+      secretKeyKey: secret-access-key

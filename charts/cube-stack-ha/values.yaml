@@ -423,6 +423,29 @@ cubestore:
   extraEnv: []
   extraEnvFrom: []
 
+  # ---- CronJob backup of the metastore -----------------------------------
+  # In HA, all 3 routers hold the same Raft-replicated state, so the
+  # CronJob backs up router-0 on a fixed schedule (no leader detection
+  # — the data is identical across replicas). Default off.
+  # Reuses the AWS credentials configured in `cubestore.remoteStorage.s3`.
+  # See docs/RESTORE.md for the restore path.
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"            # 02:00 UTC daily
+    destination: "s3://my-cube-backups/cube-stack-ha"
+    image:
+      repository: amazon/aws-cli
+      tag: latest
+      pullPolicy: IfNotPresent
+    kubectlVersion: v1.31.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
   # ---- HA fork — Raft-replicated metastore --------------------------------
   # Activates the agriev/cube fork's Raft replication for the Cube Store
   # router. When `enabled: true`, every metadata write goes through Raft

@@ -1,0 +1,5 @@
+{{ include "cubeStack.cubestore.backupCronJob" . }}
+{{- if .Values.cubestore.backup.enabled }}
+---
+{{ include "cubeStack.cubestore.backupRBAC" . }}
+{{- end }}

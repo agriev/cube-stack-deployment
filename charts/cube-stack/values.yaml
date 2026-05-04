@@ -421,6 +421,32 @@ cubestore:
   # `cube-stack-ha` from the same repo (it's the agriev/cube fork wired
   # up with Raft).
 
+  # ---- CronJob backup of the metastore -----------------------------------
+  # When enabled, a CronJob runs daily, exec's into the router pod, tars
+  # /cube/.cubestore/data, and pushes the archive to S3. Default off.
+  # Reuses the AWS credentials configured in `cubestore.remoteStorage.s3`.
+  # See docs/RESTORE.md for the restore path.
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"            # 02:00 UTC daily
+    # S3 prefix that the CronJob writes to. The archive name is
+    # appended at run time as `<prefix>/<release>-<UTC-timestamp>.tar.gz`.
+    destination: "s3://my-cube-backups/cube-stack"
+    # The image needs aws-cli; kubectl is downloaded into /tmp at run
+    # time. For prod, bake an image with both pre-installed.
+    image:
+      repository: amazon/aws-cli
+      tag: latest
+      pullPolicy: IfNotPresent
+    kubectlVersion: v1.31.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
   router:
     replicas: 1
     resources:
