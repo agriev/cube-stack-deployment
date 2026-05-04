@@ -60,17 +60,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chart: [cube-stack, cube-stack-ha]
+        include:
+          - chart: cube-stack
+            overlay: values-prod.yaml
+          - chart: cube-stack-ha
+            overlay: values-ha-test.yaml
     steps:
       - uses: actions/checkout@v4
+
+      # Render the chart into raw manifests first. kube-linter v0.7+
+      # struggles with helm charts that depend on a file:// library
+      # subchart (it can't resolve the local dep), so we hand it the
+      # already-rendered output via a tmp dir.
+      - name: render chart for kube-linter
+        run: |
+          mkdir -p _rendered
+          docker run --rm -v "$PWD":/work -w /work \
+            alpine/helm:3.16.3 dependency update charts/${{ matrix.chart }}
+          docker run --rm -v "$PWD":/work -w /work \
+            alpine/helm:3.16.3 template ci charts/${{ matrix.chart }} \
+            -f charts/${{ matrix.chart }}/values.yaml \
+            -f charts/${{ matrix.chart }}/${{ matrix.overlay }} \
+            > _rendered/${{ matrix.chart }}.yaml
+
       - uses: stackrox/kube-linter-action@v1.0.5
         with:
-          directory: charts/${{ matrix.chart }}
+          directory: _rendered
           config: .kube-linter.yaml
           format: sarif
           output-file: kube-linter.sarif
 
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: kube-linter.sarif
           category: kube-linter-${{ matrix.chart }}
