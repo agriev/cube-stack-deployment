@@ -1,0 +1,98 @@
+name: ha-soak
+
+on:
+  schedule:
+    # 02:00 UTC daily — the runner cluster should be quiet at that hour.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Soak duration in seconds (default 3600 = 1h)'
+        required: false
+        default: '3600'
+      failover_budget:
+        description: 'Per-cycle failover budget in seconds (default 30)'
+        required: false
+        default: '30'
+
+# This job needs a self-hosted runner with kubectl + a usable kube
+# context against a kind/k3d/real cluster. GitHub-hosted runners are
+# capped at 6h and don't provide a persistent k8s — set up your own
+# runner per docs/ops/self-hosted-runner.md before enabling this
+# workflow's schedule.
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: HA soak — interleaved chaos for $DURATION
+    # Operators: replace the `cube-soak-runner` label with whatever your
+    # self-hosted runner pool exposes. The cron above will fail loud if
+    # no runner picks the job up — that's intentional.
+    runs-on: [self-hosted, cube-soak-runner]
+    timeout-minutes: 90
+    env:
+      NS: cube-ha
+      DURATION: ${{ github.event.inputs.duration || '3600' }}
+      INTERVAL: '120'
+      FAILOVER_BUDGET: ${{ github.event.inputs.failover_budget || '30' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ensure HA cluster is up
+        run: |
+          if ! kubectl -n "$NS" get sts -l app.kubernetes.io/component=cubestore-router \
+              --no-headers 2>/dev/null | grep -q cubestore-router; then
+            echo "::error::No HA cubestore-router StatefulSet in namespace $NS — install with 'make ha-deploy' on the runner"
+            exit 1
+          fi
+          # Sanity: 3 routers Ready before we start chaos.
+          ready=$(kubectl -n "$NS" get pods -l app.kubernetes.io/component=cubestore-router \
+            -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.status.containerStatuses[0].ready}{"\n"}{end}' \
+            | grep -c true || true)
+          if [ "$ready" -lt 3 ]; then
+            echo "::error::cluster not at full health pre-soak: $ready/3 ready"
+            exit 1
+          fi
+          echo "Pre-soak: 3/3 routers Ready ✓"
+
+      - name: run soak
+        id: soak
+        run: |
+          OUT=/tmp/ha-soak-$(date -u +%Y%m%dT%H%M%S).jsonl
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          NS="$NS" DURATION="$DURATION" INTERVAL="$INTERVAL" \
+            FAILOVER_BUDGET="$FAILOVER_BUDGET" OUT="$OUT" \
+            scripts/ha-soak.sh
+
+      - name: summarize
+        if: always()
+        run: |
+          OUT="${{ steps.soak.outputs.out }}"
+          [ -f "$OUT" ] || { echo "no output file"; exit 0; }
+          echo "## HA soak summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Total rounds: $(wc -l < "$OUT")" >> "$GITHUB_STEP_SUMMARY"
+          echo "Distinct leaders observed: $(jq -r '.leader_after' "$OUT" | sort -u | grep -v '^$' | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Max failover (s): $(jq -r '.failover_secs' "$OUT" | sort -n | tail -1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "p95 failover (s): $(jq -r '.failover_secs' "$OUT" | sort -n | awk -v p=0.95 'BEGIN{c=0} {a[c++]=$0} END{print a[int(c*p)]}')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Over budget: $(jq --argjson b "$FAILOVER_BUDGET" 'select(.failover_secs > $b)' "$OUT" | jq -s 'length')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload soak log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ha-soak-${{ github.run_id }}
+          path: /tmp/ha-soak-*.jsonl
+          retention-days: 30
+
+      # Optional: notify on regression. Set HA_SOAK_WEBHOOK in repo
+      # secrets to a Slack/Discord/Mattermost incoming webhook URL.
+      - name: notify on failure
+        if: failure() && env.HA_SOAK_WEBHOOK != ''
+        env:
+          HA_SOAK_WEBHOOK: ${{ secrets.HA_SOAK_WEBHOOK }}
+        run: |
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "{\"text\": \"HA soak regression on ${GITHUB_REPOSITORY}@${GITHUB_SHA::7} — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" \
+            "$HA_SOAK_WEBHOOK"
