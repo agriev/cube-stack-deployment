@@ -84,11 +84,13 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
+          # cosign-installer doesn't ship `crane`, so we let cosign resolve
+          # the tag→digest itself. Signing by tag attaches the signature
+          # to the underlying digest, which is what `cosign verify` reads
+          # in the post-publish job.
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          digest=$(crane digest "ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}" || true)
-          if [ -n "$digest" ]; then
-            cosign sign --yes "ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}@${digest}"
-          fi
+          ref="ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}"
+          cosign sign --yes "$ref"
 
       - name: create GitHub release
         uses: softprops/action-gh-release@v2
