@@ -1,0 +1,78 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cubeStack.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.metrics.prometheusRule.namespace }}
+  labels:
+    {{- include "cubeStack.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: cube-stack-common
+      rules:
+        {{- include "cubeStack.prometheusRule.commonRules" . | nindent 8 }}
+
+    - name: cube-stack-ha-raft
+      rules:
+        {{/*
+        HA-only Raft alerts. Metrics come from the agriev/cube fork's
+        statsd emitter (`cs.raft.*`) translated to Prometheus by the
+        statsd-exporter sidecar. The metrics are: `cs_raft_is_leader`
+        (1/0 per pod), `cs_raft_term` (monotonic counter), and
+        `cs_raft_commit_index` etc. (see docs/ha/grafana/raft-cluster.json
+        in agriev/cube for the full list).
+
+        Selectors don't filter by chart label because the fork's metric
+        names already carry the `cs_raft_` prefix that's unambiguous.
+        Add a `chart` matcher via `prometheusRule.extraSelector` if you
+        run multiple cube-stack-ha releases in one Prometheus.
+        */}}
+        - alert: CubeStoreNoLeader
+          expr: sum(cs_raft_is_leader) == 0
+          for: 1m
+          labels:
+            severity: critical
+            chart: {{ .Chart.Name }}
+          annotations:
+            summary: "Cube Store HA — no Raft leader"
+            description: |
+              Zero routers self-report as leader for 1 minute.  Writes
+              are blocked until election converges. Check
+              `kubectl -n {{`{{ $labels.namespace }}`}} logs -l app.kubernetes.io/component=cubestore-router | grep -i raft`.
+
+        - alert: CubeStoreRaftLeaderFlapping
+          expr: changes(cs_raft_is_leader[5m]) > 3
+          for: 0s
+          labels:
+            severity: warning
+            chart: {{ .Chart.Name }}
+          annotations:
+            summary: "Cube Store HA — leader flapping ({{`{{ $value }}`}} changes / 5m)"
+            description: |
+              The leader pod has changed more than 3 times in 5 minutes.
+              Common cause: TCP transport issues (cached connections vs
+              recycled pod IPs — the M8 fix in agriev/cube addresses
+              this). Check pod restart counts and node network health.
+
+        - alert: CubeStoreRaftTermAdvancingFast
+          expr: rate(cs_raft_term[5m]) > 0.1
+          for: 1m
+          labels:
+            severity: critical
+            chart: {{ .Chart.Name }}
+          annotations:
+            summary: "Cube Store HA — election storm (term rate {{`{{ $value }}`}}/s)"
+            description: |
+              Raft term is incrementing faster than 1 election per ~10s.
+              Indicates unstable network or a CPU-saturated leader.
+              Capture `cs_raft_*` for every router and check the
+              transport layer.
+    {{- with .Values.metrics.prometheusRule.extraRules }}
+    - name: cube-stack-extra
+      rules:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}

@@ -773,6 +773,17 @@ metrics:
     relabelings: []
     metricRelabelings: []
 
+  # PrometheusRule alerts — common (api/router/PVC/refresh-worker)
+  # plus HA-specific Raft alerts (no-leader, leader flapping, election
+  # storm). Default off; turn on alongside `serviceMonitor.enabled` and
+  # `statsdExporter.enabled` (the Raft alerts need the statsd-exporter
+  # sidecar to translate `cs.raft.*` from statsd to Prometheus).
+  prometheusRule:
+    enabled: false
+    namespace: ""
+    labels: {}
+    extraRules: []
+
   # Optional Grafana dashboard ConfigMap (auto-imported by sidecars)
   grafanaDashboard:
     enabled: false

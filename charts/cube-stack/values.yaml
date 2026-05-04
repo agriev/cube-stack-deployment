@@ -702,6 +702,22 @@ metrics:
     relabelings: []
     metricRelabelings: []
 
+  # PrometheusRule (kube-prometheus-stack-style) — alerts for api/router
+  # down, PVC near-full, refresh-worker crash-looping. Default off; turn
+  # on alongside `serviceMonitor.enabled` for full observability.
+  prometheusRule:
+    enabled: false
+    # Namespace where the PrometheusRule lands. Default = release namespace.
+    namespace: ""
+    # Labels added to the PrometheusRule resource. Use this to match the
+    # `prometheus.prometheusSelector` of your Prometheus instance (e.g.
+    # `release: kube-prometheus-stack`).
+    labels: {}
+    # Inline extra alert rules — appended as a separate group. List of
+    # plain Prometheus alert dicts. Each dict must have `alert`, `expr`,
+    # optionally `for`, `labels`, `annotations`.
+    extraRules: []
+
   # Optional Grafana dashboard ConfigMap (auto-imported by sidecars)
   grafanaDashboard:
     enabled: false
