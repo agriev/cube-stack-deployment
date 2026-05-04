@@ -3,7 +3,9 @@ name: release
 on:
   push:
     tags:
-      - 'chart-v*'   # e.g. chart-v1.0.0
+      - 'cube-stack-v*'         # e.g. cube-stack-v1.1.0   → vanilla chart
+      - 'cube-stack-ha-v*'      # e.g. cube-stack-ha-v1.0.0 → HA chart
+      - 'chart-v*'              # legacy alias for cube-stack (back-compat)
 
 permissions:
   contents: write
@@ -23,27 +25,43 @@ jobs:
         with:
           version: v3.16.3
 
-      - name: extract chart version from tag
+      - name: parse tag → chart name + version
         id: tag
         run: |
-          tag="${GITHUB_REF#refs/tags/chart-v}"
-          echo "version=${tag}" >> "$GITHUB_OUTPUT"
+          tag="${GITHUB_REF#refs/tags/}"
+          # tag forms accepted:
+          #   cube-stack-ha-vX.Y.Z   → chart=cube-stack-ha, ver=X.Y.Z
+          #   cube-stack-vX.Y.Z      → chart=cube-stack, ver=X.Y.Z
+          #   chart-vX.Y.Z           → chart=cube-stack, ver=X.Y.Z (legacy)
+          if [[ "$tag" == cube-stack-ha-v* ]]; then
+            echo "chart=cube-stack-ha" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#cube-stack-ha-v}" >> "$GITHUB_OUTPUT"
+          elif [[ "$tag" == cube-stack-v* ]]; then
+            echo "chart=cube-stack" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#cube-stack-v}" >> "$GITHUB_OUTPUT"
+          elif [[ "$tag" == chart-v* ]]; then
+            echo "chart=cube-stack" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#chart-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::tag $tag does not match any known release pattern"
+            exit 1
+          fi
 
       - name: ensure Chart.yaml matches tag
         run: |
-          chart_ver=$(grep -E '^version:' charts/cube-stack/Chart.yaml | awk '{print $2}' | tr -d '"')
+          chart_ver=$(grep -E '^version:' charts/${{ steps.tag.outputs.chart }}/Chart.yaml | awk '{print $2}' | tr -d '"')
           if [ "$chart_ver" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "::error::Chart.yaml version ($chart_ver) does not match tag (${{ steps.tag.outputs.version }})"
+            echo "::error::charts/${{ steps.tag.outputs.chart }}/Chart.yaml version ($chart_ver) does not match tag (${{ steps.tag.outputs.version }})"
             exit 1
           fi
 
       - name: helm dependency update
-        run: helm dependency update charts/cube-stack
+        run: helm dependency update charts/${{ steps.tag.outputs.chart }}
 
       - name: package chart
         run: |
           mkdir -p _packages
-          helm package charts/cube-stack --destination _packages
+          helm package charts/${{ steps.tag.outputs.chart }} --destination _packages
 
       - name: log in to GHCR (OCI registry)
         run: |
@@ -67,9 +85,9 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          digest=$(crane digest "ghcr.io/${owner}/charts/cube-stack:${{ steps.tag.outputs.version }}" || true)
+          digest=$(crane digest "ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}" || true)
           if [ -n "$digest" ]; then
-            cosign sign --yes "ghcr.io/${owner}/charts/cube-stack@${digest}"
+            cosign sign --yes "ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}@${digest}"
           fi
 
       - name: create GitHub release

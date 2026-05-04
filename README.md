@@ -1,13 +1,25 @@
 # cube-stack
 
-Production-grade, scalable Helm chart **+** build pipelines for the
+Production-grade Helm charts **+** build pipelines for the
 [Cube.js Community Edition](https://cube.dev/) semantic layer on Kubernetes.
+
+This repo ships **two charts**, sharing common helpers via a
+[Helm library chart](charts/cube-stack-common):
+
+| Chart | When to use it | Cube Store router |
+| --- | --- | --- |
+| [`cube-stack`](charts/cube-stack) | Vanilla community Cube.js — single-router metastore | 1 replica, no replication |
+| [`cube-stack-ha`](charts/cube-stack-ha) | Production HA — survives a single router pod loss in <10 s | 3 replicas with embedded Raft (via the [`agriev/cube`](https://github.com/agriev/cube/blob/ha-main/HA.md) fork) |
+
+Both charts cover the same components — Cube API, Cube Refresh Worker, Cube
+Store Router, Cube Store Workers, optional Redis. They differ only in the
+metastore replication story.
 
 | Component | Image | Purpose |
 | --- | --- | --- |
 | Cube API | `cubejs/cube` | Request-serving Pods (REST/GraphQL/SQL APIs) — scaled by HPA |
 | Cube Refresh Worker | `cubejs/cube` | Background pre-aggregation builder (`CUBEJS_REFRESH_WORKER=true`) |
-| Cube Store Router | `cubejs/cubestore` | Cluster metadata + query planner |
+| Cube Store Router | `cubejs/cubestore` (vanilla) / `cubestore-ha` from `agriev/cube` (HA) | Cluster metadata + query planner |
 | Cube Store Workers | `cubejs/cubestore` | Distributed query execution (StatefulSet) |
 | Redis (optional) | `bitnami/redis` | Legacy queue/cache driver — Cube Store handles this by default |
 
@@ -29,6 +41,15 @@ helm upgrade --install cube charts/cube-stack \
   -n cube --create-namespace --wait
 kubectl -n cube port-forward svc/cube-cube-stack-api 4000
 open http://localhost:4000      # Cube Playground
+```
+
+For the HA variant (3-router Raft cluster, requires the [`agriev/cube`](https://github.com/agriev/cube/blob/ha-main/HA.md) fork's image — `make ha-image` builds it locally):
+
+```bash
+make ha-image            # build cubestore-ha:vdev locally
+make ha-deploy           # 3-router cluster in namespace cube-ha
+make ha-verify           # election + single-failover smoke test
+make ha-chaos            # 5-round kill-leader chaos (~90 s)
 ```
 
 Standard deploy with overrides (the chart will refuse to install if you

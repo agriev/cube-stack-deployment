@@ -1,0 +1,62 @@
+apiVersion: v2
+name: cube-stack-ha
+description: |
+  HA Helm chart for Cube.js with **Raft-replicated Cube Store metadata**.
+  Built on the agriev/cube fork (`ha-main` branch), which adds embedded
+  Raft consensus to the Cube Store router so the metastore survives a
+  single-router failure with sub-10s automatic failover and no external
+  coordinator (no ZooKeeper / etcd).
+
+  Default config is a 3-router cluster sized for production. For vanilla
+  community Cube.js (single router, no Raft) use the `cube-stack` chart
+  in the same repo.
+type: application
+version: 1.0.0
+appVersion: "1.6.41"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/agriev/cube-stack-deployment
+icon: https://cube.dev/downloads/cube-logo-narrow.svg
+sources:
+  - https://github.com/agriev/cube
+  - https://github.com/agriev/cube-stack-deployment
+keywords:
+  - cube
+  - cubejs
+  - cubestore
+  - high-availability
+  - raft
+  - semantic-layer
+  - analytics
+  - olap
+  - data
+maintainers:
+  - name: agriev
+    email: a.s.griev@gmail.com
+dependencies:
+  - name: cube-stack-common
+    version: 1.0.0
+    repository: file://../cube-stack-common
+  - name: redis
+    version: "20.6.2"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+    tags:
+      - cache
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: 1.0.0 — first release of the HA variant; 3-router Raft cluster, leader election, sub-10s failover
+    - kind: added
+      description: PDB with minAvailable=replicas-1 to protect quorum during voluntary disruptions
+    - kind: added
+      description: Grafana dashboard ConfigMap for cs.raft.* metrics
+    - kind: added
+      description: Makefile targets ha-image / ha-deploy / ha-verify / ha-chaos / ha-down / ha-reset
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Cube documentation
+      url: https://cube.dev/docs
+    - name: agriev/cube HA fork
+      url: https://github.com/agriev/cube/blob/ha-main/HA.md
+    - name: Vanilla variant of this chart
+      url: https://github.com/agriev/cube-stack-deployment/tree/main/charts/cube-stack

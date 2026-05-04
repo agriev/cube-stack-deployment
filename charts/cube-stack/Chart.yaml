@@ -5,14 +5,19 @@ description: |
   semantic layer. Bundles Cube API, Refresh Worker, Cube Store Router and
   Cube Store Workers (cluster mode) into a single deployable unit with full
   configuration via a single values.yaml.
+
+  This is the **vanilla** chart — single Cube Store router, no Raft. For
+  the HA variant (3-router Raft-replicated metastore on the agriev/cube
+  fork), use `cube-stack-ha` from the same repo.
 type: application
-version: 1.0.0
+version: 1.1.0
 appVersion: "1.6.41"
 kubeVersion: ">=1.25.0-0"
 home: https://cube.dev
 icon: https://cube.dev/downloads/cube-logo-narrow.svg
 sources:
   - https://github.com/cube-js/cube
+  - https://github.com/agriev/cube-stack-deployment
 keywords:
   - cube
   - cubejs
@@ -22,9 +27,12 @@ keywords:
   - olap
   - data
 maintainers:
-  - name: Platform Team
+  - name: agriev
     email: a.s.griev@gmail.com
 dependencies:
+  - name: cube-stack-common
+    version: 1.0.0
+    repository: file://../cube-stack-common
   - name: redis
     version: "20.6.2"
     repository: https://charts.bitnami.com/bitnami
@@ -33,6 +41,8 @@ dependencies:
       - cache
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: 1.1.0 — split out HA into a separate `cube-stack-ha` chart; helpers moved to `cube-stack-common` library
     - kind: added
       description: Initial release with Cube 1.6.x and Cube Store cluster mode
     - kind: added
@@ -47,3 +57,5 @@ annotations:
       url: https://cube.dev/docs
     - name: Cube Store production guide
       url: https://cube.dev/docs/product/caching/running-in-production
+    - name: HA variant of this chart
+      url: https://github.com/agriev/cube-stack-deployment/tree/main/charts/cube-stack-ha

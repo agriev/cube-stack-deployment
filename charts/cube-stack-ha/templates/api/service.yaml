@@ -1,0 +1,36 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeStack.api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  {{- with .Values.api.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.api.service.type }}
+  selector: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.cube.apiPort }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: http
+    {{- if gt (.Values.cube.pgSqlPort | int) 0 }}
+    - name: pgsql
+      port: {{ .Values.cube.pgSqlPort }}
+      targetPort: pgsql
+      protocol: TCP
+    {{- end }}
+    {{- if gt (.Values.cube.sqlPort | int) 0 }}
+    - name: sql
+      port: {{ .Values.cube.sqlPort }}
+      targetPort: sql
+      protocol: TCP
+    {{- end }}
+    {{- with .Values.api.service.extraPorts }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

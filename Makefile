@@ -3,6 +3,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 CHART        := charts/cube-stack
+CHART_HA     := charts/cube-stack-ha
 RELEASE      ?= cube
 NAMESPACE    ?= cube
 VALUES       ?= $(CHART)/values.yaml
@@ -16,16 +17,23 @@ HELM_FILES = -f $(VALUES) $(if $(OVERLAY),-f $(OVERLAY),)
 
 ##@ Helm
 
-.PHONY: deps lint template render-prod render-dev install upgrade uninstall test status
+.PHONY: deps deps-all lint lint-all template render-prod render-dev render-ha install upgrade uninstall test status
 
-deps:           ## Pull chart dependencies
+deps:           ## Pull chart dependencies for the vanilla chart
 	helm dependency update $(CHART)
 
-lint: deps      ## helm lint with default + every overlay
+deps-all: deps  ## Pull deps for both vanilla and HA charts
+	helm dependency update $(CHART_HA)
+
+lint: deps      ## helm lint with default + every overlay (vanilla)
 	helm lint $(CHART)
 	helm lint $(CHART) -f $(CHART)/values.yaml -f $(CHART)/values-prod.yaml
 	helm lint $(CHART) -f $(CHART)/values.yaml -f $(CHART)/values-dev.yaml
 	helm lint $(CHART) -f $(CHART)/values.yaml -f $(CHART)/values-quickstart.yaml
+
+lint-all: lint deps-all ## Lint both charts × every overlay
+	helm lint $(CHART_HA)
+	helm lint $(CHART_HA) -f $(CHART_HA)/values.yaml -f $(CHART_HA)/values-ha-test.yaml
 
 template: deps  ## Render chart with $(VALUES) (and optional $(OVERLAY))
 	helm template $(RELEASE) $(CHART) $(HELM_FILES) --namespace $(NAMESPACE)
@@ -41,6 +49,10 @@ render-dev: deps ## Render with the dev overlay
 render-quickstart: deps ## Render with the quickstart overlay (zero external deps)
 	helm template $(RELEASE) $(CHART) -f $(CHART)/values.yaml -f $(CHART)/values-quickstart.yaml --namespace $(NAMESPACE) > rendered-quickstart.yaml
 	@echo "→ rendered-quickstart.yaml"
+
+render-ha: deps-all ## Render the HA chart with the ha-test overlay
+	helm template cube-ha $(CHART_HA) -f $(CHART_HA)/values.yaml -f $(CHART_HA)/values-ha-test.yaml --namespace cube-ha > rendered-ha.yaml
+	@echo "→ rendered-ha.yaml"
 
 quickstart: deps ## Install in quickstart mode (zero external deps)
 	helm upgrade --install $(RELEASE) $(CHART) \
@@ -146,15 +158,15 @@ ha-image:        ## Build the HA fork's cubestore image (cubestore-ha:dev)
 	    --build-arg WITH_AVX2=0 \
 	    -f cubestore/Dockerfile .
 
-ha-deploy:       ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
+ha-deploy: deps-all ## Deploy 3-router HA cluster to local k8s (namespace cube-ha)
 	@if kubectl describe node docker-desktop 2>/dev/null | grep -q "DiskPressure     True"; then \
 	  echo "ERROR: kubectl reports DiskPressure on docker-desktop node. kubelet will evict pods on schedule."; \
 	  echo "       Free disk inside the Docker VM (Settings → Resources → Disk image size, then \"Apply & restart\")"; \
 	  echo "       or run \`docker system prune -a\` (destructive — wipes all Docker artifacts)."; \
 	  exit 1; \
 	fi
-	helm upgrade --install cube-ha $(CHART) \
-	  -f $(CHART)/values.yaml -f $(CHART)/values-ha-test.yaml \
+	helm upgrade --install cube-ha $(CHART_HA) \
+	  -f $(CHART_HA)/values.yaml -f $(CHART_HA)/values-ha-test.yaml \
 	  --namespace cube-ha --create-namespace \
 	  --wait --timeout 5m
 

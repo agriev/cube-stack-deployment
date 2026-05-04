@@ -1,0 +1,25 @@
+apiVersion: v2
+name: cube-stack-common
+description: |
+  Helm library chart with shared helpers, env-var generators and label
+  conventions used by both `cube-stack` (vanilla Cube.js) and
+  `cube-stack-ha` (Cube.js with Raft-replicated metadata, agriev/cube fork).
+
+  Library charts are not installable on their own — this chart is consumed
+  as a `dependencies:` entry from the two concrete charts above.
+type: library
+version: 1.0.0
+appVersion: "1.6.41"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/agriev/cube-stack-deployment
+icon: https://cube.dev/downloads/cube-logo-narrow.svg
+sources:
+  - https://github.com/agriev/cube-stack-deployment
+keywords:
+  - cube
+  - cubejs
+  - cubestore
+  - library
+maintainers:
+  - name: agriev
+    email: a.s.griev@gmail.com

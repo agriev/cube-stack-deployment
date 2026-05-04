@@ -3,9 +3,11 @@
 *.bak
 *.tmp
 
-# Helm
+# Helm — pulled subchart deps (regenerated via `helm dependency update`)
 charts/cube-stack/charts/
 charts/cube-stack/Chart.lock
+charts/cube-stack-ha/charts/
+charts/cube-stack-ha/Chart.lock
 *.tgz
 
 # Rendered output / scratch

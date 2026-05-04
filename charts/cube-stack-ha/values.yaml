@@ -59,9 +59,17 @@ image:
 ## Set `cubestoreImage.archSuffix` to add a per-arch suffix to the resolved
 ## tag, e.g. archSuffix: "-arm64v8" → "v1.6.41-arm64v8".
 ## -----------------------------------------------------------------------------
+## NOTE — this chart needs the agriev/cube fork's image, NOT upstream
+## cubejs/cubestore. The fork adds the CUBESTORE_HA_MODE=raft codepath;
+## upstream silently ignores the env var and starts a single-node store
+## that drifts out of sync with its replicas.
+##
+## Build the local image with `make ha-image` (produces `cubestore-ha:vdev`)
+## or push your own to a registry and override `repository` + `tag`. The
+## helper auto-prepends `v` to non-v tags, so `vdev` stays `vdev`.
 cubestoreImage:
-  repository: cubejs/cubestore
-  tag: ""
+  repository: cubestore-ha
+  tag: vdev
   archSuffix: ""        # "" | "-arm64v8" | "-non-avx"
   pullPolicy: IfNotPresent
 
@@ -415,14 +423,60 @@ cubestore:
   extraEnv: []
   extraEnvFrom: []
 
-  # ---- HA mode is in a separate chart ------------------------------------
-  # This chart (`cube-stack`) is the vanilla Community Edition — single
-  # router, no metadata replication. For 3-router Raft HA, switch to
-  # `cube-stack-ha` from the same repo (it's the agriev/cube fork wired
-  # up with Raft).
+  # ---- HA fork — Raft-replicated metastore --------------------------------
+  # Activates the agriev/cube fork's Raft replication for the Cube Store
+  # router. When `enabled: true`, every metadata write goes through Raft
+  # consensus across `cubestore.router.replicas` pods; a single pod kill
+  # is recovered from in <5s with no manual intervention.
+  #
+  # Pre-flight before flipping `enabled: true`:
+  #
+  # 1. Use the `agriev/cube` fork image (`cubestoreImage.repository`).
+  #    The upstream `cubejs/cubestore` image doesn't ship the
+  #    `CUBESTORE_HA_MODE=raft` codepath.
+  # 2. Set `cubestore.router.replicas` to an odd number ≥ 3 (typically 3).
+  #    Raft quorum is `(N/2)+1` so 3 replicas survive 1 pod loss; 5
+  #    replicas survive 2.
+  # 3. Persistent storage is REQUIRED — Raft log durability depends on
+  #    it. `cubestore.router.persistence.enabled: true` is the default.
+  # 4. The router pods need to talk to each other on `ha.raftPort`.
+  #    A headless service is created automatically; a NetworkPolicy is
+  #    your responsibility.
+  ha:
+    # HA is the chart's identity — defaults to ON. Setting `enabled: false`
+    # collapses cube-stack-ha down to a single-router non-replicating
+    # deployment, at which point you should be using the vanilla
+    # `cube-stack` chart instead.
+    enabled: true
+
+    # TCP port the raft transport listens on. Distinct from `metaPort`
+    # (9999, router↔workers control plane) so heartbeat traffic doesn't
+    # compete with worker queries. Default 9100 matches the binary.
+    raftPort: 9100
+
+    # Where the Raft log + HardState + ConfState live on disk. Default
+    # is a sub-directory of `cubestore.router.persistence.mountPath` so
+    # it shares the same PVC. Override only if you need to point Raft
+    # at a separate volume (e.g. NVMe vs the metastore's slower disk).
+    raftLogDir: ""
+
+    # Optional: a Grafana dashboard ConfigMap labeled for sidecar-style
+    # dashboard providers (Grafana operator, kube-prometheus-stack's
+    # grafana-dashboards-loader, etc.). When `enabled: true`, ships the
+    # `cs.raft.*` operator dashboard from `agriev/cube/docs/ha/grafana/`.
+    dashboard:
+      enabled: false
+      # Label the dashboard sidecar watches. kube-prometheus-stack uses
+      # `grafana_dashboard: "1"` by default; adjust if your sidecar
+      # watches a different label.
+      labels:
+        grafana_dashboard: "1"
 
   router:
-    replicas: 1
+    # 3 routers form a Raft quorum that survives one pod loss. 5 routers
+    # survive two; an even count would let a half-and-half partition
+    # block writes — `_validations.tpl` rejects even counts.
+    replicas: 3
     resources:
       requests:
         cpu: "1"

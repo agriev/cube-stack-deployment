@@ -20,6 +20,14 @@ jobs:
   helm-lint:
     name: helm lint + template + kubeconform
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chart: cube-stack
+            overlays: [values-prod.yaml, values-dev.yaml, values-quickstart.yaml]
+          - chart: cube-stack-ha
+            overlays: [values-ha-test.yaml]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,50 +36,27 @@ jobs:
           version: v3.16.3
 
       - name: helm dependency update
-        run: helm dependency update charts/cube-stack
+        run: helm dependency update charts/${{ matrix.chart }}
 
       - name: helm lint (default values)
-        run: helm lint charts/cube-stack
+        run: helm lint charts/${{ matrix.chart }}
 
-      - name: helm lint (prod overlay)
-        run: |
-          helm lint charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-prod.yaml
-
-      - name: helm lint (dev overlay)
-        run: |
-          helm lint charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-dev.yaml
-
-      - name: helm lint (quickstart overlay)
-        run: |
-          helm lint charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-quickstart.yaml
-
-      - name: helm template (quickstart)
+      - name: helm lint + template (each overlay)
         run: |
           mkdir -p _rendered
-          helm template ci charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-quickstart.yaml \
-            --namespace cube --create-namespace > _rendered/quickstart.yaml
+          for ov in ${{ join(matrix.overlays, ' ') }}; do
+            echo "→ lint $ov"
+            helm lint charts/${{ matrix.chart }} \
+              -f charts/${{ matrix.chart }}/values.yaml \
+              -f charts/${{ matrix.chart }}/$ov
 
-      - name: helm template (prod)
-        run: |
-          helm template ci charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-prod.yaml \
-            --namespace cube --create-namespace > _rendered/prod.yaml
-
-      - name: helm template (dev)
-        run: |
-          helm template ci charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-dev.yaml \
-            --namespace cube --create-namespace > _rendered/dev.yaml
+            echo "→ template $ov"
+            helm template ci charts/${{ matrix.chart }} \
+              -f charts/${{ matrix.chart }}/values.yaml \
+              -f charts/${{ matrix.chart }}/$ov \
+              --namespace cube --create-namespace \
+              > _rendered/${{ matrix.chart }}-${ov%.yaml}.yaml
+          done
 
       - name: install kubeconform
         run: |
@@ -90,7 +75,7 @@ jobs:
       - name: upload rendered manifests
         uses: actions/upload-artifact@v4
         with:
-          name: rendered-manifests
+          name: rendered-manifests-${{ matrix.chart }}
           path: _rendered/
 
   chart-testing:
@@ -120,11 +105,11 @@ jobs:
           version: v0.24.0
           cluster_name: cube-ci
 
-      - name: ct install (quickstart)
+      - name: ct install (quickstart on cube-stack)
         run: |
           ct install \
             --target-branch main \
             --chart-dirs charts \
-            --all \
+            --charts charts/cube-stack \
             --helm-extra-args="--timeout 10m" \
             --helm-extra-set-args="--values=charts/cube-stack/values-quickstart.yaml"

@@ -1,0 +1,119 @@
+{{- if .Values.refreshWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cubeStack.refreshWorker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "cubeStack.componentLabels" (dict "ctx" . "component" "refresh-worker") | nindent 4 }}
+  {{- include "cubeStack.maybeAnnotations" . | nindent 2 }}
+spec:
+  {{- if not .Values.refreshWorker.autoscaling.enabled }}
+  replicas: {{ .Values.refreshWorker.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels: {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "refresh-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cubeStack.componentSelectorLabels" (dict "ctx" . "component" "refresh-worker") | nindent 8 }}
+        {{- with .Values.refreshWorker.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/secrets: {{ include (print .Template.BasePath "/common/secrets.yaml") . | sha256sum }}
+        {{- if .Values.schema.configMap.enabled }}
+        checksum/schema: {{ include (print .Template.BasePath "/common/schema-configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.refreshWorker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cubeStack.refreshWorker.serviceAccountName" . }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.refreshWorker.terminationGracePeriodSeconds }}
+      {{- $initFromSchema := include "cubeStack.schema.initContainers" . }}
+      {{- if or $initFromSchema .Values.refreshWorker.initContainers }}
+      initContainers:
+        {{- if $initFromSchema }}{{ $initFromSchema | nindent 8 }}{{- end }}
+        {{- with .Values.refreshWorker.initContainers }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- end }}
+      containers:
+        - name: cube
+          image: {{ include "cubeStack.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: CUBEJS_REFRESH_WORKER
+              value: "true"
+            {{- if .Values.refreshWorker.concurrency }}
+            - name: CUBEJS_REFRESH_WORKER_CONCURRENCY
+              value: {{ .Values.refreshWorker.concurrency | quote }}
+            {{- end }}
+            {{- if .Values.refreshWorker.queriesPerAppId }}
+            - name: CUBEJS_SCHEDULED_REFRESH_QUERIES_PER_APP_ID
+              value: {{ .Values.refreshWorker.queriesPerAppId | quote }}
+            {{- end }}
+            {{- if .Values.refreshWorker.timezones }}
+            - name: CUBEJS_SCHEDULED_REFRESH_TIMEZONES
+              value: {{ .Values.refreshWorker.timezones | quote }}
+            {{- end }}
+            {{- if .Values.refreshWorker.batchingRowSplit }}
+            - name: CUBEJS_BATCHING_ROW_SPLIT
+              value: {{ .Values.refreshWorker.batchingRowSplit | quote }}
+            {{- end }}
+            {{- include "cubeStack.cubeEnv" . | nindent 12 }}
+            {{- with .Values.cube.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+            {{- with .Values.refreshWorker.extraEnv }}{{- toYaml . | nindent 12 }}{{- end }}
+          {{- $envFrom := concat (default (list) .Values.cube.extraEnvFrom) (default (list) .Values.refreshWorker.extraEnvFrom) }}
+          {{- if $envFrom }}
+          envFrom:
+            {{- toYaml $envFrom | nindent 12 }}
+          {{- end }}
+          {{- /*
+            The refresh worker is a long-running Node.js process with no HTTP
+            listener, so we trust Kubernetes' built-in process-exit detection.
+            If you really want a probe, mount a sentinel file from cube.js:
+            require('fs').writeFileSync('/tmp/alive', '', { mtime: Date.now() })
+            and use exec [test -f /tmp/alive] here.
+          */}}
+          {{- with .Values.refreshWorker.customLivenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources: {{- toYaml .Values.refreshWorker.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "cubeStack.schema.volumeMounts" . | nindent 12 }}
+            {{- with .Values.refreshWorker.extraVolumeMounts }}{{- toYaml . | nindent 12 }}{{- end }}
+        {{- with .Values.refreshWorker.sidecars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- include "cubeStack.schema.volumes" . | nindent 8 }}
+        {{- with .Values.refreshWorker.extraVolumes }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.refreshWorker.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.refreshWorker.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.refreshWorker.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $tsc := include "cubeStack.topologySpread" (dict "ctx" . "component" "refresh-worker" "user" .Values.refreshWorker.topologySpreadConstraints) }}
+      {{- if trim $tsc }}
+      topologySpreadConstraints:
+        {{- $tsc | nindent 8 }}
+      {{- end }}
+{{- end }}

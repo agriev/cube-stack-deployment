@@ -4,9 +4,9 @@
 # so the test focuses on the M4 / M5 / M6 / M7 wiring.
 #
 # Apply with:
-#   helm upgrade --install cube-ha charts/cube-stack \
-#     -f charts/cube-stack/values.yaml \
-#     -f charts/cube-stack/values-ha-test.yaml \
+#   helm upgrade --install cube-ha charts/cube-stack-ha \
+#     -f charts/cube-stack-ha/values.yaml \
+#     -f charts/cube-stack-ha/values-ha-test.yaml \
 #     -n cube-ha --create-namespace --wait
 #
 # Pre-flight on docker-desktop k8s:

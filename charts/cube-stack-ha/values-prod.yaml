@@ -1,0 +1,131 @@
+# Production overlay — high availability + cloud object storage.
+# Apply on top of values.yaml:
+#   helm upgrade --install cube ./charts/cube-stack \
+#     -n cube --create-namespace \
+#     -f charts/cube-stack/values.yaml \
+#     -f charts/cube-stack/values-prod.yaml \
+#     -f my-secrets.yaml
+
+global:
+  topologySpread: hard
+  storageClass: gp3
+
+api:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 65
+  pdb:
+    enabled: true
+    minAvailable: 2
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 6Gi
+
+refreshWorker:
+  replicas: 2
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+
+cubestore:
+  router:
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "8"
+        memory: 16Gi
+    persistence:
+      size: 100Gi
+  workers:
+    replicas: 4
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "8"
+        memory: 24Gi
+    persistence:
+      size: 200Gi
+  remoteStorage:
+    type: s3
+    s3:
+      bucket: my-cube-prod-bucket
+      region: us-east-1
+      existingSecret: cube-aws-creds
+      accessKeyKey: AWS_ACCESS_KEY_ID
+      secretKeyKey: AWS_SECRET_ACCESS_KEY
+
+# Production datasource — replace with your real warehouse credentials.
+datasources:
+  default:
+    type: postgres
+    host: postgres-primary.data.svc.cluster.local
+    port: 5432
+    database: analytics
+    user: cube
+    existingSecret: cube-pg
+    passwordKey: password
+    maxPool: 16
+    ssl:
+      enabled: true
+      rejectUnauthorized: true
+    # If you also need an export bucket for big pre-aggs:
+    export:
+      type: s3
+      bucket: s3://my-cube-export
+      region: us-east-1
+      aws:
+        existingSecret: cube-aws-creds
+        keyKey: AWS_ACCESS_KEY_ID
+        secretKey: AWS_SECRET_ACCESS_KEY
+
+cube:
+  preAggregationsSchema: "prod_pre_aggregations"
+  dbQueryTimeout: 30m
+  maxSessions: 4096
+  defaultApiScopes: "graphql,meta,data,jobs"
+  jwt:
+    enabled: true
+    audience: "https://api.example.com"
+    issuer: "https://auth.example.com/"
+    algorithms: "RS256"
+    jwkUrl: "https://auth.example.com/.well-known/jwks.json"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+  hosts:
+    - host: cube.prod.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cube-prod-tls
+      hosts:
+        - cube.prod.example.com
+
+metrics:
+  serviceMonitor:
+    enabled: true
+  statsdExporter:
+    enabled: true
+
+networkPolicy:
+  enabled: true

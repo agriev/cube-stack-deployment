@@ -1,0 +1,75 @@
+# Local / dev overlay — single-node Cube Store, in-cluster Postgres
+# datasource, no Ingress, no metrics. Suitable for kind / minikube.
+
+global:
+  topologySpread: ""        # don't bother spreading on a 1-node cluster
+
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+refreshWorker:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+cubestore:
+  router:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      size: 5Gi
+  workers:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      size: 5Gi
+    pdb:
+      enabled: false
+  remoteStorage:
+    type: shared-pvc
+    sharedPvc:
+      size: 10Gi
+      accessModes: ["ReadWriteOnce"]   # single-node, so RWO is fine
+
+cube:
+  devMode: false
+  logLevel: debug
+
+datasources:
+  default:
+    type: postgres
+    host: postgres.default.svc.cluster.local
+    port: 5432
+    database: cube_demo
+    user: cube
+    password: cube
+
+ingress:
+  enabled: false

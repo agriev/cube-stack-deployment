@@ -60,8 +60,17 @@ The actual call is made from common/_validations-call.yaml.
 {{- /* Auto-generates random password — that's fine. */ -}}
 {{- end -}}
 
-{{- /* Vanilla chart can't replicate Cube Store metadata. Reject multi-router configs. */ -}}
-{{- if and .Values.cubestore.enabled (gt (.Values.cubestore.router.replicas | int) 1) -}}
-{{- fail (printf "cubestore.router.replicas must be 1 in the vanilla cube-stack chart (got %d). Cube Store Community Edition can't replicate router metadata; use the cube-stack-ha chart for a 3-router Raft-replicated cluster." (.Values.cubestore.router.replicas | int)) -}}
+{{- /* HA fork — Raft replication requires an odd, ≥3 replica count. */ -}}
+{{- if and .Values.cubestore.enabled .Values.cubestore.ha.enabled -}}
+{{- $replicas := .Values.cubestore.router.replicas | int -}}
+{{- if lt $replicas 3 -}}
+{{- fail (printf "cubestore.ha.enabled=true requires cubestore.router.replicas >= 3 (got %d). Raft quorum is (N/2)+1 — 1 or 2 replicas can't survive a single failure." $replicas) -}}
+{{- end -}}
+{{- if eq (mod $replicas 2) 0 -}}
+{{- fail (printf "cubestore.ha.enabled=true requires an ODD cubestore.router.replicas (got %d). Even replica counts let half-and-half partitions block writes indefinitely." $replicas) -}}
+{{- end -}}
+{{- if not .Values.cubestore.router.persistence.enabled -}}
+{{- fail "cubestore.ha.enabled=true requires cubestore.router.persistence.enabled=true. Raft log durability depends on a stable PVC; emptyDir would lose committed entries on pod restart." -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
