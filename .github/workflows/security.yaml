@@ -16,7 +16,16 @@ permissions:
 
 jobs:
   trivy-config:
+    name: trivy config (${{ matrix.chart }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chart: cube-stack
+            overlay: values-prod.yaml
+          - chart: cube-stack-ha
+            overlay: values-ha-test.yaml
     steps:
       - uses: actions/checkout@v4
 
@@ -24,14 +33,15 @@ jobs:
         run: |
           mkdir -p _rendered
           docker run --rm -v "$PWD":/work -w /work \
-            alpine/helm:3.16.3 dependency update charts/cube-stack
+            alpine/helm:3.16.3 dependency update charts/${{ matrix.chart }}
           docker run --rm -v "$PWD":/work -w /work \
-            alpine/helm:3.16.3 template ci charts/cube-stack \
-            -f charts/cube-stack/values.yaml \
-            -f charts/cube-stack/values-prod.yaml > _rendered/prod.yaml
+            alpine/helm:3.16.3 template ci charts/${{ matrix.chart }} \
+            -f charts/${{ matrix.chart }}/values.yaml \
+            -f charts/${{ matrix.chart }}/${{ matrix.overlay }} \
+            > _rendered/${{ matrix.chart }}.yaml
 
       - name: trivy config (k8s)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: _rendered/
@@ -42,19 +52,25 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-k8s.sarif
-          category: trivy-k8s
+          category: trivy-k8s-${{ matrix.chart }}
 
   kube-linter:
+    name: kube-linter (${{ matrix.chart }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: [cube-stack, cube-stack-ha]
     steps:
       - uses: actions/checkout@v4
       - uses: stackrox/kube-linter-action@v1.0.5
         with:
-          directory: charts/cube-stack
+          directory: charts/${{ matrix.chart }}
+          config: .kube-linter.yaml
           format: sarif
           output-file: kube-linter.sarif
 
       - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: kube-linter.sarif
-          category: kube-linter
+          category: kube-linter-${{ matrix.chart }}

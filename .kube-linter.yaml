@@ -1,0 +1,24 @@
+checks:
+  # Disable intentionally-non-applicable checks. Each one is documented
+  # so future contributors know the trade-off.
+  exclude:
+    # Cube and Cube Store write to /cube/conf at runtime (schema reload,
+    # query cache, raft log). containerSecurityContext.readOnlyRootFilesystem
+    # is intentionally `false` in values.yaml — see the comment near
+    # containerSecurityContext for context.
+    - "no-read-only-root-fs"
+
+    # Optional 1.27+ field; not all clusters support it. We rely on
+    # PDB.minAvailable (vanilla) / minAvailable=replicas-1 (HA) for
+    # quorum protection — that's enforced everywhere.
+    - "pdb-unhealthy-pod-eviction-policy"
+
+    # The chart deliberately ships with `affinity: {}` for api +
+    # refresh-worker (mode-agnostic) and lets the user opt in via
+    # `topologySpread`. cube-stack-ha now sets podAntiAffinity for the
+    # router StatefulSet (PR-2 / A1); api + worker remain configurable.
+    - "no-anti-affinity"
+
+  # Run all the standard checks the kube-linter team curates, except the
+  # excludes above.
+  addAllBuiltIn: true

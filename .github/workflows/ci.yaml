@@ -97,7 +97,11 @@ jobs:
       - uses: helm/chart-testing-action@v2.6.1
 
       - name: ct lint
-        run: ct lint --target-branch main --chart-dirs charts --all --validate-maintainers=false
+        # cube-stack-common is a Helm library chart — has no installable
+        # resources and no values surface, so ct's "render with default
+        # values" pass blows up with the validation message from one of
+        # the concrete charts that does the include. Skip it explicitly.
+        run: ct lint --target-branch main --chart-dirs charts --all --validate-maintainers=false --excluded-charts cube-stack-common
 
       - name: create kind cluster
         uses: helm/kind-action@v1.10.0
