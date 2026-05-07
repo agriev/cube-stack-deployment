@@ -227,57 +227,24 @@ jobs:
       - name: verify tarball appears in MinIO
         run: |
           set -euo pipefail
-          # mc as a Job in-cluster — same pattern as bucket creation,
-          # avoids port-forward race conditions.
-          cat <<'EOF' | kubectl apply -f -
-          apiVersion: batch/v1
-          kind: Job
-          metadata:
-            name: mc-verify
-            namespace: minio
-          spec:
-            ttlSecondsAfterFinished: 60
-            backoffLimit: 1
-            template:
-              spec:
-                restartPolicy: OnFailure
-                containers:
-                  - name: mc
-                    image: minio/mc:RELEASE.2025-02-08T19-14-21Z
-                    command: [ /bin/sh, -c ]
-                    args:
-                      - |
-                        set -euo pipefail
-                        mc alias set local http://minio.minio.svc.cluster.local:9000 admin changeme
-                        echo "--- contents of cube-backups bucket ---"
-                        mc ls --recursive local/cube-backups/
-                        count=$(mc ls --recursive local/cube-backups/ | grep -c 'tar.gz' || true)
-                        echo "tar.gz objects: $count"
-                        [ "$count" -ge 1 ]
-          EOF
-          # Wait for the Job to settle (Complete or Failed), then dump
-          # pod logs. mc verify is a fast (~5s) Job — wait-for-Ready
-          # races against Succeeded, and ttlSecondsAfterFinished GC's
-          # the pod within seconds. Polling Job conditions directly is
-          # the only stable observation point.
-          end=$((SECONDS + 120))
-          phase=""
-          while [ $SECONDS -lt $end ]; do
-            phase=$(kubectl -n minio get job mc-verify \
-              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
-            if echo "$phase" | grep -qw 'Complete\|Failed'; then break; fi
-            sleep 2
-          done
-          echo "mc-verify phase: $phase"
-          # Best-effort logs from any pod that owned the job.
-          POD=$(kubectl -n minio get pods -l job-name=mc-verify \
-            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-          if [ -n "$POD" ]; then
-            kubectl -n minio logs $POD --tail=100 || true
-          else
-            echo "(pod already GC'd by ttlSecondsAfterFinished)"
-          fi
-          echo "$phase" | grep -qw 'Complete' || exit 1
+          # The minio image bundles `mc` already. Exec straight into
+          # the running minio pod instead of spinning up a sidecar
+          # Job — avoids race conditions around fast Pod GC and is
+          # easier to debug because output streams to the workflow
+          # synchronously.
+          MINIO_POD=$(kubectl -n minio get pods -l app=minio \
+            -o jsonpath='{.items[0].metadata.name}')
+          echo "minio pod: $MINIO_POD"
+
+          kubectl -n minio exec $MINIO_POD -- /bin/sh -c '
+            set -eu
+            mc alias set local http://minio.minio.svc.cluster.local:9000 admin changeme >/dev/null
+            echo "--- contents of cube-backups bucket ---"
+            mc ls --recursive local/cube-backups/
+            count=$(mc ls --recursive local/cube-backups/ 2>/dev/null | grep -c "tar.gz" || true)
+            echo "tar.gz objects: $count"
+            test "$count" -ge 1
+          '
 
       # NOTE: the full uninstall + recreate-PVC + untar + reinstall
       # restore loop is documented in docs/RESTORE.md but exceeds the
