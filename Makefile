@@ -78,6 +78,16 @@ uninstall:      ## helm uninstall + delete namespace
 test:           ## helm test
 	helm test $(RELEASE) -n $(NAMESPACE)
 
+# PR-T1: regenerate the values reference table inside each chart's
+# README.md from values.yaml comments. CI gate at .github/workflows/docs.yaml
+# fails on uncommitted diff so every contributor runs `make docs` before push.
+docs:           ## regenerate chart README values tables (requires helm-docs)
+	@command -v helm-docs >/dev/null || { \
+	  echo "install helm-docs: https://github.com/norwoodj/helm-docs"; \
+	  exit 1; \
+	}
+	helm-docs --chart-search-root charts
+
 status:         ## kubectl status of every component
 	kubectl -n $(NAMESPACE) get all,pdb,hpa,ingress,networkpolicy,servicemonitor 2>/dev/null
 
