@@ -203,20 +203,26 @@ jobs:
           echo "--- end of pod logs ---"
 
           # Wait for the Job controller to flip the status to Complete
-          # or Failed. The pod exits cleanly before the controller sees
-          # it, so a check immediately after `kubectl logs -f` races
-          # against the controller's reconcile.
+          # or Failed. K8s 1.31+ emits both `SuccessCriteriaMet` and
+          # `Complete` as True conditions on a successful Job, so the
+          # type list is space-separated; substring match handles
+          # both legacy ("Complete") and modern ("SuccessCriteriaMet
+          # Complete") shapes.
           end=$((SECONDS + 60))
+          phase=""
           while [ $SECONDS -lt $end ]; do
             phase=$(kubectl -n cube get job backup-test-1 \
               -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
-            if [ -n "$phase" ]; then
+            if echo "$phase" | grep -qw 'Complete\|Failed'; then
               echo "job phase: $phase"
               break
             fi
             sleep 2
           done
-          [ "$phase" = "Complete" ] || { echo "::error::backup job did not Complete (phase=$phase)"; exit 1; }
+          if ! echo "$phase" | grep -qw 'Complete'; then
+            echo "::error::backup job did not Complete (phase=$phase)"
+            exit 1
+          fi
 
       - name: verify tarball appears in MinIO
         run: |
