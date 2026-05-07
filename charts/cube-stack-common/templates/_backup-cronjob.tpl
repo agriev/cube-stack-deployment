@@ -60,6 +60,11 @@ spec:
                   value: {{ .Values.cubestore.backup.destination | quote }}
                 - name: KUBECTL_VERSION
                   value: {{ .Values.cubestore.backup.kubectlVersion | quote }}
+                # Storage class — empty for MinIO/Ceph (no tiers),
+                # STANDARD_IA or GLACIER_IR for AWS S3 cost tiering.
+                # Empty value falls through to backend default.
+                - name: STORAGE_CLASS
+                  value: {{ default "" (dig "storageClass" "" .Values.cubestore.backup) | quote }}
                 {{- /*
                   Reuse the same creds Cube Store itself uses. The
                   backup container needs:
@@ -134,10 +139,18 @@ spec:
                   KEY="${DESTINATION%/}/${ARCHIVE}"
 
                   echo "==> backup ${POD}:${DATA_DIR} → ${KEY}"
+                  # Storage class is configurable because MinIO / Ceph
+                  # S3-compatible backends reject AWS-specific tiers
+                  # like STANDARD_IA. Empty value means "omit the flag",
+                  # which lets the backend use its default tier.
+                  STORAGE_CLASS_FLAG=""
+                  if [ -n "${STORAGE_CLASS:-}" ]; then
+                    STORAGE_CLASS_FLAG="--storage-class $STORAGE_CLASS"
+                  fi
                   /tmp/kubectl -n "$NS" exec "$POD" -- \
                       tar -cz -C "$DATA_DIR" . \
                     | aws s3 cp - "$KEY" \
-                        --storage-class STANDARD_IA \
+                        $STORAGE_CLASS_FLAG \
                         --metadata "release={{ .Release.Name }},chart={{ .Chart.Name }},chart_version={{ .Chart.Version }}"
 
                   echo "==> success: $KEY"
