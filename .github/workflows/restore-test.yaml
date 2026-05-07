@@ -255,8 +255,28 @@ jobs:
                         echo "tar.gz objects: $count"
                         [ "$count" -ge 1 ]
           EOF
-          kubectl -n minio wait --for=condition=complete --timeout=2m job/mc-verify
-          kubectl -n minio logs job/mc-verify --tail 30
+          # Stream pod logs (same pattern as backup-test). kubectl wait
+          # against multi-condition Job status doesn't always match
+          # cleanly on k8s 1.31+; logs -f is simpler.
+          for i in $(seq 1 30); do
+            POD=$(kubectl -n minio get pods -l job-name=mc-verify \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            [ -n "$POD" ] && break
+            sleep 2
+          done
+          kubectl -n minio wait --for=condition=Ready pod/$POD --timeout=2m || true
+          kubectl -n minio logs -f $POD || true
+          # Substring-match Complete in Job conditions
+          end=$((SECONDS + 30))
+          phase=""
+          while [ $SECONDS -lt $end ]; do
+            phase=$(kubectl -n minio get job mc-verify \
+              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+            if echo "$phase" | grep -qw 'Complete\|Failed'; then break; fi
+            sleep 2
+          done
+          echo "mc-verify phase: $phase"
+          echo "$phase" | grep -qw 'Complete' || exit 1
 
       # NOTE: the full uninstall + recreate-PVC + untar + reinstall
       # restore loop is documented in docs/RESTORE.md but exceeds the
