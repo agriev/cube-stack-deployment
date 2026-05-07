@@ -433,11 +433,14 @@ cubestore:
     enabled: false
     schedule: "0 2 * * *"            # 02:00 UTC daily
     destination: "s3://my-cube-backups/cube-stack-ha"
+    # PR-O3: pinned tag (was `:latest`).
     image:
       repository: amazon/aws-cli
-      tag: latest
+      tag: "2.17.42"
       pullPolicy: IfNotPresent
     kubectlVersion: v1.31.0
+    pvcReclaimPolicy: Retain
+    veleroVolumeName: data
     resources:
       requests:
         cpu: 100m

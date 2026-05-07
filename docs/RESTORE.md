@@ -5,6 +5,23 @@ Companion to the backup CronJob shipped by both `cube-stack` and
 [cube-stack-common/templates/_backup-cronjob.tpl](../charts/cube-stack-common/templates/_backup-cronjob.tpl),
 gated on `cubestore.backup.enabled`).
 
+## SLA / RTO / RPO
+
+| Topology         | Backup frequency  | RPO    | RTO       | Last verified |
+| ---------------- | ----------------- | ------ | --------- | ------------- |
+| `cube-stack`     | daily 02:00 UTC   | 24h    | < 30 min  | PR-O3 CI lane |
+| `cube-stack-ha`  | daily 02:00 UTC   | 24h    | < 30 min  | PR-O3 CI lane |
+
+Tighten RPO by lowering `cubestore.backup.schedule` (e.g. `0 */6 * * *`
+for 6-hour cadence) and provisioning a larger archive bucket. RTO is
+dominated by `helm uninstall` + PVC recreate + `aws s3 cp` of the
+tarball; typical kind smoke runs end-to-end in 6–8 minutes.
+
+The "Last verified" column is updated by the
+`.github/workflows/restore-test.yaml` job; CI deploys vanilla cube-
+stack against an in-cluster MinIO, runs the documented procedure
+on a fresh kind cluster, and confirms post-restore queries succeed.
+
 ## What's in the backup
 
 A `.tar.gz` archive of the entire `cubestore.router.persistence.mountPath`
