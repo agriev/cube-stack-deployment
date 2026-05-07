@@ -1,0 +1,55 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":separateMajorReleases",
+    ":semanticCommits",
+    "schedule:weekly"
+  ],
+  "timezone": "Europe/Berlin",
+  "labels": ["deps"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 8,
+  "rangeStrategy": "pin",
+  "packageRules": [
+    {
+      "description": "Auto-merge GitHub Actions minor + patch updates",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Manual review for action major bumps (breaking inputs)",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["deps", "action-major"]
+    },
+    {
+      "description": "Bitnami subchart — patch + minor auto, major manual",
+      "matchManagers": ["helmv3"],
+      "matchPackageNames": ["redis"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Bitnami major bumps need a chart values audit",
+      "matchManagers": ["helmv3"],
+      "matchPackageNames": ["redis"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["deps", "subchart-major"]
+    },
+    {
+      "description": "Pin every action by SHA, then track the tag for readability",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true
+  }
+}

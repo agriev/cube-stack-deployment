@@ -1,0 +1,51 @@
+name: docs
+
+# PR-T1: helm-docs autogen guard. The values reference table inside each
+# chart's README.md is rendered from values.yaml comments via helm-docs.
+# This workflow re-runs helm-docs on every PR that touches values.yaml or
+# the Chart.yaml; if the committed README is out of sync it fails the
+# job. Contributors regenerate locally via `make docs` before pushing.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**/values.yaml'
+      - 'charts/**/Chart.yaml'
+      - 'charts/**/README.md'
+      - 'charts/**/README.md.gotmpl'
+      - '.github/workflows/docs.yaml'
+  pull_request:
+    paths:
+      - 'charts/**/values.yaml'
+      - 'charts/**/Chart.yaml'
+      - 'charts/**/README.md'
+      - 'charts/**/README.md.gotmpl'
+      - '.github/workflows/docs.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  helm-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install helm-docs
+        run: |
+          curl -sL https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz \
+            | tar xz -C /tmp
+          sudo mv /tmp/helm-docs /usr/local/bin/helm-docs
+
+      - name: run helm-docs
+        run: helm-docs --chart-search-root charts
+
+      - name: assert no diff
+        run: |
+          if ! git diff --exit-code -- charts/; then
+            echo "::error::helm-docs produced a diff. Run \`make docs\` locally and commit the result." >&2
+            git diff -- charts/ | head -100 >&2
+            exit 1
+          fi
