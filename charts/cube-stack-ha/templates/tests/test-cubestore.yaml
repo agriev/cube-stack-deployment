@@ -31,5 +31,34 @@ spec:
           echo "→ Cube Store router /readyz"
           curl -fsS "http://{{ include "cubeStack.cubestore.router.fullname" . }}:{{ .Values.cubestore.statusPort }}/readyz"
           echo
+          {{- if .Values.metrics.statsdExporter.enabled }}
+          # PR-O1: HA Raft consensus assertion. Hits every router pod's
+          # statsd-exporter sidecar (port 9102) and confirms exactly one
+          # leader. Without this check the chart could ship "green" with
+          # a partially-elected cluster (e.g. all followers, term flapping).
+          # Gated on metrics.statsdExporter.enabled — if statsd is off,
+          # the metric isn't exposed, so we'd be checking a 404.
+          echo "→ Cube Store Raft: expecting exactly one leader across {{ .Values.cubestore.router.replicas }} routers"
+          leaders=0
+          terms=""
+          for i in $(seq 0 $(({{ .Values.cubestore.router.replicas }} - 1))); do
+            url="http://{{ include "cubeStack.cubestore.router.fullname" . }}-${i}.{{ include "cubeStack.cubestore.router.headless" . }}:{{ .Values.metrics.statsdExporter.httpPort }}/metrics"
+            metrics=$(curl -fsS "$url" || true)
+            is_leader=$(echo "$metrics" | awk '/^cs_raft_is_leader/ && $NF=="1" {print "1"; exit}')
+            term=$(echo "$metrics" | awk '/^cs_raft_term/ {print $NF; exit}')
+            terms="$terms ${term:-?}"
+            if [ "$is_leader" = "1" ]; then
+              leaders=$((leaders + 1))
+              echo "  ✓ router-${i}: leader (term=${term})"
+            else
+              echo "  · router-${i}: follower (term=${term})"
+            fi
+          done
+          echo "leader count: $leaders ; terms:$terms"
+          if [ "$leaders" != "1" ]; then
+            echo "FAIL: expected 1 leader, got $leaders" >&2
+            exit 1
+          fi
+          {{- end }}
           echo "OK"
 {{- end }}
