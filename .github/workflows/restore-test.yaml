@@ -227,24 +227,27 @@ jobs:
       - name: verify tarball appears in MinIO
         run: |
           set -euo pipefail
-          # The minio image bundles `mc` already. Exec straight into
-          # the running minio pod instead of spinning up a sidecar
-          # Job — avoids race conditions around fast Pod GC and is
-          # easier to debug because output streams to the workflow
-          # synchronously.
-          MINIO_POD=$(kubectl -n minio get pods -l app=minio \
-            -o jsonpath='{.items[0].metadata.name}')
-          echo "minio pod: $MINIO_POD"
+          # Port-forward to MinIO and use the runner's `mc` (installed
+          # earlier). The minio image is distroless and lacks grep/wc/
+          # awk, so we can't reliably count objects from inside the
+          # pod. The runner has full GNU tooling.
+          kubectl -n minio port-forward svc/minio 9000:9000 >/tmp/pf.log 2>&1 &
+          PF_PID=$!
+          trap "kill $PF_PID 2>/dev/null || true" EXIT
+          # Give port-forward a moment to bind.
+          for i in $(seq 1 10); do
+            if curl -fsS http://localhost:9000/minio/health/ready >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
 
-          kubectl -n minio exec $MINIO_POD -- /bin/sh -c '
-            set -eu
-            mc alias set local http://minio.minio.svc.cluster.local:9000 admin changeme >/dev/null
-            echo "--- contents of cube-backups bucket ---"
-            mc ls --recursive local/cube-backups/
-            count=$(mc ls --recursive local/cube-backups/ 2>/dev/null | grep -c "tar.gz" || true)
-            echo "tar.gz objects: $count"
-            test "$count" -ge 1
-          '
+          mc alias set local http://localhost:9000 admin changeme >/dev/null
+          echo "--- contents of cube-backups bucket ---"
+          mc ls --recursive local/cube-backups/ | tee /tmp/mc-ls.txt
+          count=$(grep -c 'tar.gz' /tmp/mc-ls.txt || true)
+          echo "tar.gz objects: $count"
+          test "$count" -ge 1
 
       # NOTE: the full uninstall + recreate-PVC + untar + reinstall
       # restore loop is documented in docs/RESTORE.md but exceeds the
