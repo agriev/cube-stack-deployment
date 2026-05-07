@@ -108,15 +108,36 @@ jobs:
       - name: create MinIO bucket
         run: |
           set -euo pipefail
-          # mc client running as a Job inside the cluster: avoids
-          # port-forwarding from the runner before the bucket exists.
-          kubectl -n minio run mc-bucket --rm -i --restart=Never \
-            --image=minio/mc:RELEASE.2025-02-08T19-14-21Z -- \
-            sh -c '
-              mc alias set local http://minio:9000 admin changeme &&
-              mc mb local/cube-backups || true &&
-              mc ls local/
-            '
+          # `kubectl run --image=mc -- args` overrides args, NOT
+          # entrypoint — and the mc image's entrypoint is `mc`, so
+          # `mc sh -c '…'` doesn't parse. Use a Pod manifest with an
+          # explicit `command:` override instead. ttlSecondsAfterFinished
+          # cleans the Pod up automatically.
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: mc-bucket
+            namespace: minio
+          spec:
+            ttlSecondsAfterFinished: 60
+            backoffLimit: 2
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                  - name: mc
+                    image: minio/mc:RELEASE.2025-02-08T19-14-21Z
+                    command: [ /bin/sh, -c ]
+                    args:
+                      - |
+                        set -euo pipefail
+                        mc alias set local http://minio.minio.svc.cluster.local:9000 admin changeme
+                        mc mb --ignore-existing local/cube-backups
+                        mc ls local/
+          EOF
+          kubectl -n minio wait --for=condition=complete --timeout=2m job/mc-bucket
+          kubectl -n minio logs job/mc-bucket --tail 20
 
       - name: deploy cube-stack with backup enabled (quickstart schema, MinIO target)
         run: |
