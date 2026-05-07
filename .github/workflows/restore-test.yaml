@@ -54,25 +54,69 @@ jobs:
       - name: create kind cluster
         run: kind create cluster --wait 60s
 
-      - name: deploy in-cluster MinIO
+      - name: deploy in-cluster MinIO (direct manifest)
         run: |
           set -euo pipefail
+          # Inline manifest avoids the bitnami/minio chart, whose
+          # registry was moved to Bitnami Premium in 2025 and now
+          # ImagePullBackOff's on public DockerHub. We use the
+          # upstream minio/minio image directly with a single
+          # replica + ephemeral storage — adequate for the smoke
+          # test that only writes one tarball.
           kubectl create namespace minio
-          helm repo add bitnami https://charts.bitnami.com/bitnami
-          # MinIO 14.x default resource requests are sized for prod and
-          # don't fit on a kind cluster's single-node default pool; we
-          # explicitly drop them here. 8m timeout (was 5m) covers the
-          # ~3-4m image pulls on a cold runner.
-          helm -n minio install minio bitnami/minio --version 14.7.0 \
-            --set auth.rootUser=admin \
-            --set auth.rootPassword=changeme \
-            --set defaultBuckets=cube-backups \
-            --set resources.requests.cpu=100m \
-            --set resources.requests.memory=256Mi \
-            --set resources.limits.cpu=500m \
-            --set resources.limits.memory=512Mi \
-            --set persistence.enabled=false \
-            --wait --timeout 8m
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: minio
+            namespace: minio
+          spec:
+            replicas: 1
+            selector: { matchLabels: { app: minio } }
+            template:
+              metadata: { labels: { app: minio } }
+              spec:
+                containers:
+                  - name: minio
+                    image: minio/minio:RELEASE.2025-02-07T23-21-09Z
+                    args:
+                      - server
+                      - /data
+                      - --console-address
+                      - ":9001"
+                    env:
+                      - { name: MINIO_ROOT_USER,     value: admin }
+                      - { name: MINIO_ROOT_PASSWORD, value: changeme }
+                    ports:
+                      - { containerPort: 9000, name: api }
+                      - { containerPort: 9001, name: console }
+                    resources:
+                      requests: { cpu: 100m, memory: 256Mi }
+                      limits:   { cpu: 500m, memory: 512Mi }
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: { name: minio, namespace: minio }
+          spec:
+            selector: { app: minio }
+            ports:
+              - { name: api,     port: 9000, targetPort: 9000 }
+              - { name: console, port: 9001, targetPort: 9001 }
+          EOF
+          kubectl -n minio rollout status deploy/minio --timeout 5m
+
+      - name: create MinIO bucket
+        run: |
+          set -euo pipefail
+          # mc client running as a Job inside the cluster: avoids
+          # port-forwarding from the runner before the bucket exists.
+          kubectl -n minio run mc-bucket --rm -i --restart=Never \
+            --image=minio/mc:RELEASE.2025-02-08T19-14-21Z -- \
+            sh -c '
+              mc alias set local http://minio:9000 admin changeme &&
+              mc mb local/cube-backups || true &&
+              mc ls local/
+            '
 
       - name: deploy cube-stack with backup enabled (quickstart schema, MinIO target)
         run: |
