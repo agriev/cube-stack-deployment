@@ -60,6 +60,21 @@ The actual call is made from common/_validations-call.yaml.
 {{- /* Auto-generates random password — that's fine. */ -}}
 {{- end -}}
 
+{{- /* PR-T2: TLS pre-flight — requires v0.2+ image. */ -}}
+{{- if (dig "tls" "enabled" false .Values.cubestore) -}}
+{{- if not (dig "tls" "existingSecret" "" .Values.cubestore) -}}
+{{- fail "cubestore.tls.enabled=true requires cubestore.tls.existingSecret to be set (mount a TLS-typed Secret with tls.crt + tls.key + ca.crt)." -}}
+{{- end -}}
+{{- if not (dig "tls" "acknowledgeImageTag" false .Values.cubestore) -}}
+{{- fail "cubestore.tls.enabled=true requires the agriev/cube cubestore-ha:v0.2.0+ image (rustls-backed transport). Set cubestore.tls.acknowledgeImageTag=true to confirm you're on v0.2+. See docs/ha/RAFT-TLS-DESIGN.md." -}}
+{{- end -}}
+{{- $authMode := default "require" (dig "tls" "clientAuth" "" .Values.cubestore) -}}
+{{- $allowedAuth := list "none" "optional" "require" -}}
+{{- if not (has $authMode $allowedAuth) -}}
+{{- fail (printf "cubestore.tls.clientAuth must be one of: %s" (join ", " $allowedAuth)) -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* HA fork — Raft replication requires an odd, ≥3 replica count. */ -}}
 {{- if and .Values.cubestore.enabled .Values.cubestore.ha.enabled -}}
 {{- $replicas := .Values.cubestore.router.replicas | int -}}

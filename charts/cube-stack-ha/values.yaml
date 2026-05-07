@@ -524,6 +524,43 @@ cubestore:
     # routers to a single node failure breaks Raft quorum.
     type: preferred
 
+  # ---- Inter-node TLS for Raft (PR-T2) -----------------------------------
+  # Encrypts router-to-router and worker-to-router Raft traffic. Requires
+  # the agriev/cube fork's `cubestore-ha:v0.2.0+` image (which ships the
+  # rustls-backed TcpTransport). Earlier images silently ignore the env
+  # vars and continue speaking plain TCP.
+  #
+  # On-prem deployment guidance:
+  #  - Same-zone clusters with a deny-all NetworkPolicy + namespace
+  #    isolation: plain TCP is acceptable; leave `enabled: false`.
+  #  - Cross-zone, hybrid-cloud, or multi-tenant clusters: REQUIRED.
+  #    Provision certs via cert-manager, populate `existingSecret`.
+  #
+  # Pre-flight:
+  #   - Issue a cert with SAN list = headless DNS + per-pod FQDNs:
+  #       cube-ha-cubestore-router-headless.cube-ha.svc.cluster.local
+  #       cube-ha-cubestore-router-{0,1,2}.cube-ha-cubestore-router-headless.cube-ha.svc.cluster.local
+  #   - Same for workers if you want mTLS on the worker→router channel.
+  #   - Land tls.crt / tls.key / ca.crt into a TLS-typed Secret.
+  tls:
+    enabled: false
+
+    # Pre-existing Secret holding tls.crt + tls.key + ca.crt. Required
+    # when enabled. Cert-manager Certificate object can produce one
+    # directly; see examples/values-onprem-pki.yaml for a worked
+    # cert-manager Issuer example.
+    existingSecret: ""
+
+    # mTLS mode. `require` enforces mutual auth (router rejects
+    # connections without a client cert chained to the same CA).
+    # `optional` accepts both. `none` disables mTLS — server-only TLS.
+    clientAuth: require
+
+    # PR-T2 chart-side ships ahead of the upstream Rust impl; this flag
+    # signals "I know the v0.2+ image is required". `_validations.tpl`
+    # blocks `tls.enabled: true` unless this is also true.
+    acknowledgeImageTag: false
+
   router:
     # 3 routers form a Raft quorum that survives one pod loss. 5 routers
     # survive two; an even count would let a half-and-half partition
