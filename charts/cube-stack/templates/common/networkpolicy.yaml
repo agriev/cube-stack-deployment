@@ -34,7 +34,32 @@ spec:
         {{- end }}
     {{- end }}
   {{- if not .Values.networkPolicy.allowAllEgress }}
+  # PR-O2: workable lockdown mode. The chart can't know your DB hostnames
+  # or S3 endpoints in advance — operators add those via
+  # `networkPolicy.extraEgress`. We bake in DNS (required for the
+  # cluster DNS lookup that any sidecar / probe / connection-string
+  # resolves through) and intra-namespace cube-stack traffic, which is
+  # always required. Pre-PR-O2 the egress block was `- {}` which is a
+  # match-nothing rule — i.e. silent deny-all.
   egress:
-    - {}  # Replace with explicit egress rules in your overlay
+    # DNS to the kube-system namespace. The CIDR-free namespaceSelector
+    # works on every CNI; explicit kubelet IP isn't required.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Intra-namespace cube-stack pod-to-pod (api ↔ refresh-worker ↔
+    # cubestore router ↔ workers ↔ redis subchart ↔ statsd-exporter).
+    - to:
+        - podSelector:
+            matchLabels: {{- include "cubeStack.selectorLabels" . | nindent 14 }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 {{- end }}

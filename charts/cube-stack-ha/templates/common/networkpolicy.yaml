@@ -34,7 +34,25 @@ spec:
         {{- end }}
     {{- end }}
   {{- if not .Values.networkPolicy.allowAllEgress }}
+  # PR-O2: workable lockdown mode. See the vanilla chart's matching
+  # template for a longer explanation. Bakes in DNS + intra-namespace
+  # cube traffic; everything else (datasource, S3 / MinIO, external
+  # APIs) goes into `networkPolicy.extraEgress`.
   egress:
-    - {}  # Replace with explicit egress rules in your overlay
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels: {{- include "cubeStack.selectorLabels" . | nindent 14 }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 {{- end }}
