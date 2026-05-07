@@ -168,9 +168,6 @@ jobs:
       - name: trigger one-shot backup job
         run: |
           set -euo pipefail
-          # Discover the rendered CronJob by label rather than guessing
-          # the name; the chart's fullname helper prepends both release
-          # AND chart name (cube → cube-cube-stack-cubestore-router-backup).
           CJ=$(kubectl -n cube get cronjob \
             -l app.kubernetes.io/component=cubestore-backup \
             -o jsonpath='{.items[0].metadata.name}')
@@ -181,10 +178,31 @@ jobs:
           fi
           echo "found cronjob: $CJ"
           kubectl -n cube create job --from=cronjob/$CJ backup-test-1
-          # The job runs once and exits; wait for it.
-          kubectl -n cube wait --for=condition=complete \
-            --timeout=5m job/backup-test-1
-          kubectl -n cube logs job/backup-test-1 --tail 50
+
+          # Wait either condition=complete OR condition=failed, whichever
+          # comes first. The previous `wait --for=complete` masked
+          # failures with a generic timeout. 8m total covers cold runner
+          # image pulls + curl kubectl + exec tar + s3 upload.
+          end=$((SECONDS + 480))
+          while [ $SECONDS -lt $end ]; do
+            phase=$(kubectl -n cube get job backup-test-1 \
+              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+            case "$phase" in
+              Complete) echo "✓ backup job complete"; break;;
+              Failed)   echo "::error::backup job failed"; break;;
+            esac
+            sleep 5
+          done
+
+          echo "--- backup-test-1 logs ---"
+          kubectl -n cube logs job/backup-test-1 --tail=200 || true
+          echo "--- backup-test-1 pod state ---"
+          kubectl -n cube describe pod -l job-name=backup-test-1 | tail -50 || true
+
+          # Final check after logs were captured
+          phase=$(kubectl -n cube get job backup-test-1 \
+            -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+          [ "$phase" = "Complete" ] || exit 1
 
       - name: verify tarball appears in MinIO
         run: |
