@@ -126,6 +126,18 @@ spec:
             timeoutSeconds: {{ .Values.cubestore.router.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.cubestore.router.readinessProbe.failureThreshold }}
           {{- end }}
+          {{- if (dig "startupProbe" "enabled" true .Values.cubestore.router) }}
+          # PR-O1: startup probe accommodates RocksDB recovery on large
+          # metastores AND Raft leader election on a freshly-restarted
+          # router. Default budget = 5 min (30 × 10s).
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: status
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 30 .Values.cubestore.router }}
+            periodSeconds: {{ dig "startupProbe" "periodSeconds" 10 .Values.cubestore.router }}
+            timeoutSeconds: {{ dig "startupProbe" "timeoutSeconds" 5 .Values.cubestore.router }}
+          {{- end }}
           resources: {{- toYaml .Values.cubestore.router.resources | nindent 12 }}
           volumeMounts:
             - name: data

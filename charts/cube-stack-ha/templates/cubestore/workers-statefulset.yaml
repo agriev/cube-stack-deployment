@@ -103,6 +103,16 @@ spec:
             timeoutSeconds: {{ .Values.cubestore.workers.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.cubestore.workers.readinessProbe.failureThreshold }}
           {{- end }}
+          {{- if (dig "startupProbe" "enabled" true .Values.cubestore.workers) }}
+          # PR-O1: startup probe lets RocksDB recover on slow disks /
+          # large local caches before liveness fires.
+          startupProbe:
+            tcpSocket:
+              port: worker
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 30 .Values.cubestore.workers }}
+            periodSeconds: {{ dig "startupProbe" "periodSeconds" 10 .Values.cubestore.workers }}
+            timeoutSeconds: {{ dig "startupProbe" "timeoutSeconds" 5 .Values.cubestore.workers }}
+          {{- end }}
           resources: {{- toYaml .Values.cubestore.workers.resources | nindent 12 }}
           volumeMounts:
             - name: data
