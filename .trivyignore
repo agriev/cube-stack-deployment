@@ -1,0 +1,12 @@
+# Trivy exemptions for the cube image scan.
+#
+# RULES OF ENGAGEMENT (PR-S1):
+#   - Each entry MUST have a one-line justification on the comment above it.
+#   - Each entry MUST have a `# expires: YYYY-MM-DD` line, after which the
+#     scan-fail behavior re-triggers and forces a re-evaluation. Six months
+#     is the default; shorter for "wait for upstream patch" cases.
+#   - Vulnerability IDs use Trivy's preferred form: CVE-YYYY-NNNN or
+#     GHSA-... or DLA-...; one ID per line.
+#
+# Empty by design — the image inherits debian:bookworm-slim's surface
+# only. Add entries as findings appear in CI; do NOT pre-populate.

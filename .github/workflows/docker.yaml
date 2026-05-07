@@ -104,6 +104,10 @@ jobs:
             cosign sign --yes "${tag}@${DIGEST}"
           done
 
+      # PR-S1: Trivy now FAILS the build on CRITICAL or HIGH findings.
+      # Vetted exemptions go into `.trivyignore` (see file header for the
+      # acceptance criteria). SARIF upload runs even on failure so the
+      # findings still surface in the Security tab.
       - name: scan image with Trivy
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@v0.36.0
@@ -112,10 +116,11 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: '0'
+          exit-code: '1'
+          trivyignores: '.trivyignore'
 
       - name: upload Trivy SARIF
-        if: github.event_name != 'pull_request'
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
