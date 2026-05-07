@@ -255,19 +255,12 @@ jobs:
                         echo "tar.gz objects: $count"
                         [ "$count" -ge 1 ]
           EOF
-          # Stream pod logs (same pattern as backup-test). kubectl wait
-          # against multi-condition Job status doesn't always match
-          # cleanly on k8s 1.31+; logs -f is simpler.
-          for i in $(seq 1 30); do
-            POD=$(kubectl -n minio get pods -l job-name=mc-verify \
-              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-            [ -n "$POD" ] && break
-            sleep 2
-          done
-          kubectl -n minio wait --for=condition=Ready pod/$POD --timeout=2m || true
-          kubectl -n minio logs -f $POD || true
-          # Substring-match Complete in Job conditions
-          end=$((SECONDS + 30))
+          # Wait for the Job to settle (Complete or Failed), then dump
+          # pod logs. mc verify is a fast (~5s) Job — wait-for-Ready
+          # races against Succeeded, and ttlSecondsAfterFinished GC's
+          # the pod within seconds. Polling Job conditions directly is
+          # the only stable observation point.
+          end=$((SECONDS + 120))
           phase=""
           while [ $SECONDS -lt $end ]; do
             phase=$(kubectl -n minio get job mc-verify \
@@ -276,6 +269,14 @@ jobs:
             sleep 2
           done
           echo "mc-verify phase: $phase"
+          # Best-effort logs from any pod that owned the job.
+          POD=$(kubectl -n minio get pods -l job-name=mc-verify \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          if [ -n "$POD" ]; then
+            kubectl -n minio logs $POD --tail=100 || true
+          else
+            echo "(pod already GC'd by ttlSecondsAfterFinished)"
+          fi
           echo "$phase" | grep -qw 'Complete' || exit 1
 
       # NOTE: the full uninstall + recreate-PVC + untar + reinstall
