@@ -16,6 +16,11 @@ jobs:
   release-chart:
     name: package + push helm chart
     runs-on: ubuntu-latest
+    # PR-S1: fork guard. Tags pushed to a fork must NOT trigger a release
+    # against this org's GHCR. (Fork tag-pushes don't have permissions to
+    # push to ghcr.io/agriev/charts anyway, but this is a belt-and-suspenders
+    # check that keeps the workflow log clean.)
+    if: github.repository == 'agriev/cube-stack-deployment'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,16 +108,49 @@ jobs:
           ref="ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}"
           cosign sign --yes "$ref"
 
+      # PR-S1: also produce a detached blob signature for the .tgz on disk.
+      # OCI signing only helps users who pull the chart from GHCR; air-
+      # gapped operators receive the .tgz directly and need an offline-
+      # verifiable signature pair (.tgz.sig + .tgz.cert).
+      - name: sign chart (blob, for offline / air-gapped install)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          for pkg in _packages/*.tgz; do
+            cosign sign-blob --yes \
+              --output-signature   "${pkg}.sig" \
+              --output-certificate "${pkg}.cert" \
+              "$pkg"
+          done
+
+      # PR-S1: cyclonedx SBOM for the chart bundle (Helm dep tree). Lets
+      # downstream operators audit transitive Bitnami / cube-stack-common
+      # versions without unpacking the .tgz.
+      - name: generate SBOM (cyclonedx)
+        uses: anchore/sbom-action@v0
+        with:
+          path: charts/${{ steps.tag.outputs.chart }}
+          format: cyclonedx-json
+          artifact-name: ${{ steps.tag.outputs.chart }}-${{ steps.tag.outputs.version }}.cdx.json
+          output-file: _packages/${{ steps.tag.outputs.chart }}-${{ steps.tag.outputs.version }}.cdx.json
+
       - name: create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: _packages/*.tgz
+          # Attach: chart tarball, blob signature, blob cert, SBOM. The
+          # offline-verify recipe is documented in docs/INSTALL-AIRGAP.md.
+          files: |
+            _packages/*.tgz
+            _packages/*.tgz.sig
+            _packages/*.tgz.cert
+            _packages/*.cdx.json
 
   verify-chart:
     name: cosign verify (post-publish)
     needs: release-chart
     runs-on: ubuntu-latest
+    if: github.repository == 'agriev/cube-stack-deployment'
     permissions:
       contents: read
       packages: read
@@ -144,7 +182,10 @@ jobs:
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           ref="ghcr.io/${owner}/charts/${{ steps.tag.outputs.chart }}:${{ steps.tag.outputs.version }}"
-          identity_regex="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yaml@.*"
+          # PR-S1: tighten the identity regex from `@.*` to a tag-anchored
+          # form so a workflow that ran on a non-release branch can't
+          # impersonate a release sign by accident.
+          identity_regex="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yaml@refs/tags/(cube-stack(-ha)?|chart)-v.*"
           # Retry up to 30s; ghcr OCI manifest sometimes takes a moment
           # to propagate after `helm push`.
           for i in $(seq 1 6); do
