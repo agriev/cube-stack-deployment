@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# Cancel older queued runs on the same ref when a new push lands. Keeps
+# the runner pool free during rapid PR-merge bursts; doesn't affect
+# distinct branches (each gets its own concurrency group).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   helm-lint:
     name: helm lint + template + kubeconform
