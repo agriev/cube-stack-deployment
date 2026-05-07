@@ -60,8 +60,21 @@ spec:
                   value: {{ .Values.cubestore.backup.destination | quote }}
                 - name: KUBECTL_VERSION
                   value: {{ .Values.cubestore.backup.kubectlVersion | quote }}
-                {{- /* Reuse the same AWS creds Cube Store itself uses. */ -}}
-                {{- with .Values.cubestore.remoteStorage.s3 }}
+                {{- /*
+                  Reuse the same creds Cube Store itself uses. The
+                  backup container needs:
+                    - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+                    - AWS_DEFAULT_REGION
+                    - AWS_ENDPOINT_URL_S3 when targeting MinIO / Ceph
+                      (without it, `aws s3 cp` defaults to the real
+                       AWS endpoint and silently fails)
+                  Source-of-truth is `remoteStorage.{type}` — the
+                  bucket the chart already uses to store pre-aggs.
+                  PR-O3-fixup.
+                */ -}}
+                {{- $rs := .Values.cubestore.remoteStorage -}}
+                {{- if eq $rs.type "s3" }}
+                {{- with $rs.s3 }}
                 {{- if .existingSecret }}
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
@@ -76,6 +89,33 @@ spec:
                 {{- end }}
                 - name: AWS_DEFAULT_REGION
                   value: {{ .region | quote }}
+                {{- end }}
+                {{- else if eq $rs.type "minio" }}
+                {{- with $rs.minio }}
+                {{- if .existingSecret }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .existingSecret | quote }}
+                      key: {{ .accessKeyKey | quote }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .existingSecret | quote }}
+                      key: {{ .secretKeyKey | quote }}
+                {{- end }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ default "us-east-1" .region | quote }}
+                # Tell aws-cli to talk to MinIO instead of the real
+                # AWS endpoint. Honored by aws-cli >= 2.13.
+                - name: AWS_ENDPOINT_URL_S3
+                  value: {{ .endpoint | quote }}
+                # MinIO uses path-style addressing; AWS uses
+                # virtual-hosted-style. aws-cli auto-detects in most
+                # cases, but the explicit override is safer.
+                - name: AWS_S3_ADDRESSING_STYLE
+                  value: "path"
+                {{- end }}
                 {{- end }}
               command:
                 - /bin/sh
