@@ -59,11 +59,20 @@ jobs:
           set -euo pipefail
           kubectl create namespace minio
           helm repo add bitnami https://charts.bitnami.com/bitnami
+          # MinIO 14.x default resource requests are sized for prod and
+          # don't fit on a kind cluster's single-node default pool; we
+          # explicitly drop them here. 8m timeout (was 5m) covers the
+          # ~3-4m image pulls on a cold runner.
           helm -n minio install minio bitnami/minio --version 14.7.0 \
             --set auth.rootUser=admin \
             --set auth.rootPassword=changeme \
             --set defaultBuckets=cube-backups \
-            --wait --timeout 5m
+            --set resources.requests.cpu=100m \
+            --set resources.requests.memory=256Mi \
+            --set resources.limits.cpu=500m \
+            --set resources.limits.memory=512Mi \
+            --set persistence.enabled=false \
+            --wait --timeout 8m
 
       - name: deploy cube-stack with backup enabled (quickstart schema, MinIO target)
         run: |
