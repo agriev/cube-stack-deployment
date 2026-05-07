@@ -42,14 +42,20 @@ spec:
           image: "{{ .Values.cubestore.workers.initRouterCheck.image.repository }}:{{ .Values.cubestore.workers.initRouterCheck.image.tag }}"
           imagePullPolicy: {{ .Values.cubestore.workers.initRouterCheck.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # PR-O1: bounded by `timeoutSeconds` (default 180) so a stuck
+          # router (or unfinished Raft leader election) can't pin the
+          # worker pod indefinitely. The init container exits non-zero
+          # on timeout and Kubernetes restarts with backoff.
           command:
             - /bin/sh
             - -c
             - |
-              until nc -vz {{ include "cubeStack.cubestore.router.fullname" . }} {{ .Values.cubestore.metaPort }}; do
-                echo "Waiting for Cube Store router..."
-                sleep 2
-              done
+              timeout {{ .Values.cubestore.workers.initRouterCheck.timeoutSeconds | default 180 }} sh -c '
+                until nc -vz {{ include "cubeStack.cubestore.router.fullname" . }} {{ .Values.cubestore.metaPort }}; do
+                  echo "Waiting for Cube Store router..."
+                  sleep 2
+                done
+              '
           resources: {{- toYaml .Values.cubestore.workers.initRouterCheck.resources | nindent 12 }}
       {{- end }}
       containers:
@@ -96,6 +102,16 @@ spec:
             periodSeconds: {{ .Values.cubestore.workers.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.cubestore.workers.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.cubestore.workers.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- if (dig "startupProbe" "enabled" true .Values.cubestore.workers) }}
+          # PR-O1: startup probe lets RocksDB recover on slow disks /
+          # large local caches before liveness fires.
+          startupProbe:
+            tcpSocket:
+              port: worker
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 30 .Values.cubestore.workers }}
+            periodSeconds: {{ dig "startupProbe" "periodSeconds" 10 .Values.cubestore.workers }}
+            timeoutSeconds: {{ dig "startupProbe" "timeoutSeconds" 5 .Values.cubestore.workers }}
           {{- end }}
           resources: {{- toYaml .Values.cubestore.workers.resources | nindent 12 }}
           volumeMounts:

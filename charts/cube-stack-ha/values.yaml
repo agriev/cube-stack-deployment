@@ -311,7 +311,9 @@ api:
     create: true
     name: ""
     annotations: {}
-    automountServiceAccountToken: true
+    # PR-O1: API never calls the Kubernetes API; default off shrinks the
+    # pod's privilege footprint.
+    automountServiceAccountToken: false
 
 ## -----------------------------------------------------------------------------
 ## Cube Refresh Worker (background pre-aggregation builder)
@@ -380,12 +382,15 @@ refreshWorker:
 
   podLabels: {}
   podAnnotations: {}
-  terminationGracePeriodSeconds: 120
+  # PR-O1: bumped from 120s. Pre-aggregation builds can run for minutes;
+  # SIGTERM → graceful drain in cube core needs slack before SIGKILL.
+  terminationGracePeriodSeconds: 300
 
   serviceAccount:
     create: true
     name: ""
     annotations: {}
+    automountServiceAccountToken: false
 
 ## -----------------------------------------------------------------------------
 ## Cube Store Router (single instance, holds metadata)
@@ -510,7 +515,11 @@ cubestore:
   antiAffinity:
     enabled: true
     topologyKey: kubernetes.io/hostname
-    type: required
+    # `preferred` is the safe default — degrades gracefully on single-node
+    # clusters (kind, docker-desktop, dev). Production overlays
+    # (`values-prod-ha.yaml`) flip this to `required` because losing two
+    # routers to a single node failure breaks Raft quorum.
+    type: preferred
 
   router:
     # 3 routers form a Raft quorum that survives one pod loss. 5 routers

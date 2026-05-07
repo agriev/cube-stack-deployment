@@ -92,6 +92,19 @@ spec:
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # PR-O1: lifecycle.preStop sleeps for `preStopSleepSeconds`
+          # before SIGTERM is delivered. Cube core handles SIGTERM by
+          # draining in-flight pre-aggregation jobs; the sleep buys time
+          # for the K8s endpoints controller to detach this pod from any
+          # service it's still listed in (refresh worker has no Service,
+          # but a sidecar log shipper might). Disabled by default — the
+          # cube-side SIGTERM handling is what actually matters.
+          {{- if .Values.refreshWorker.preStopSleepSeconds }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep {{ .Values.refreshWorker.preStopSleepSeconds }}"]
+          {{- end }}
           resources: {{- toYaml .Values.refreshWorker.resources | nindent 12 }}
           volumeMounts:
             {{- include "cubeStack.schema.volumeMounts" . | nindent 12 }}

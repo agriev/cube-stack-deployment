@@ -92,6 +92,13 @@ spec:
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # PR-O1: optional preStop sleep — see vanilla chart for rationale.
+          {{- if .Values.refreshWorker.preStopSleepSeconds }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep {{ .Values.refreshWorker.preStopSleepSeconds }}"]
+          {{- end }}
           resources: {{- toYaml .Values.refreshWorker.resources | nindent 12 }}
           volumeMounts:
             {{- include "cubeStack.schema.volumeMounts" . | nindent 12 }}

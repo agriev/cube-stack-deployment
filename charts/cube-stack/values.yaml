@@ -303,7 +303,10 @@ api:
     create: true
     name: ""
     annotations: {}
-    automountServiceAccountToken: true
+    # PR-O1: API never calls the Kubernetes API; default off shrinks the
+    # pod's privilege footprint. Override only if a sidecar needs the
+    # token (e.g. cluster-aware logging agent).
+    automountServiceAccountToken: false
 
 ## -----------------------------------------------------------------------------
 ## Cube Refresh Worker (background pre-aggregation builder)
@@ -372,12 +375,15 @@ refreshWorker:
 
   podLabels: {}
   podAnnotations: {}
-  terminationGracePeriodSeconds: 120
+  # PR-O1: bumped from 120s. Pre-aggregation builds can run for minutes;
+  # SIGTERM → graceful drain in cube core needs slack before SIGKILL.
+  terminationGracePeriodSeconds: 300
 
   serviceAccount:
     create: true
     name: ""
     annotations: {}
+    automountServiceAccountToken: false
 
 ## -----------------------------------------------------------------------------
 ## Cube Store Router (single instance, holds metadata)
