@@ -1,0 +1,55 @@
+# Example: Cube on self-managed K8s with internal PKI.
+#
+# Covers the two PKI knobs an on-prem deployment usually needs:
+#  1. Ingress TLS via cert-manager `Issuer` (namespace-scoped CA), as
+#     opposed to the more common `ClusterIssuer`.
+#  2. Custom CA bundle for outbound TLS — Cube and Cube Store reach
+#     datasources / S3 / MinIO endpoints whose certs are issued by an
+#     internal CA the base image's trust store doesn't know about.
+#
+# Combine with either chart's values.yaml:
+#   helm install cube    charts/cube-stack    -f charts/cube-stack/values.yaml    -f examples/values-onprem-pki.yaml
+#   helm install cube-ha charts/cube-stack-ha -f charts/cube-stack-ha/values.yaml -f examples/values-onprem-pki.yaml
+#
+# Pre-flight:
+#
+#   # 1. cert-manager Issuer in the same namespace as the chart.
+#   kubectl apply -n cube -f - <<EOF
+#   apiVersion: cert-manager.io/v1
+#   kind: Issuer
+#   metadata:
+#     name: cube-internal-ca
+#     namespace: cube
+#   spec:
+#     ca:
+#       secretName: cube-internal-ca-keypair   # tls.crt + tls.key of your CA
+#   EOF
+#
+#   # 2. CA bundle ConfigMap. The chart mounts it on every workload.
+#   kubectl -n cube create configmap cube-internal-ca-bundle \
+#     --from-file=ca-bundle.crt=/path/to/your-ca-bundle.crt
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: cube.internal.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [cube.internal.example.com]
+      secretName: cube-tls
+  annotations:
+    # Issuer (namespace-scoped) instead of ClusterIssuer — required when
+    # the org policy disallows cluster-scoped cert-manager resources.
+    cert-manager.io/issuer: cube-internal-ca
+
+# Outbound TLS — the chart reads `customCA.existingConfigMap` and
+# mounts the bundle on every cube / cubestore container.
+# (The mount path is /etc/ssl/certs/cube-custom-ca.crt; cube-side
+#  NODE_EXTRA_CA_CERTS and curl/openssl-side SSL_CERT_FILE both point
+#  at it.)
+customCA:
+  existingConfigMap: cube-internal-ca-bundle
+  key: ca-bundle.crt

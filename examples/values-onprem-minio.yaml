@@ -1,0 +1,59 @@
+# Example: Cube on self-managed K8s with in-cluster MinIO as the
+# remote storage for Cube Store.
+#
+# Combine with either chart's values.yaml:
+#   helm install cube    charts/cube-stack    -f charts/cube-stack/values.yaml    -f examples/values-onprem-minio.yaml
+#   helm install cube-ha charts/cube-stack-ha -f charts/cube-stack-ha/values.yaml -f examples/values-onprem-minio.yaml
+#
+# Pre-flight:
+#
+#   kubectl create namespace minio --dry-run=client -o yaml | kubectl apply -f -
+#   helm -n minio install minio bitnami/minio \
+#     --set auth.rootUser=admin --set auth.rootPassword='changeme' \
+#     --set defaultBuckets=cube-prod
+#
+#   kubectl create namespace cube --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n cube create secret generic cube-minio-creds \
+#     --from-literal=access-key-id='admin' \
+#     --from-literal=secret-access-key='changeme'
+#
+# NetworkPolicy lockdown — append the rule below to allow egress to
+# the MinIO namespace if you set `networkPolicy.allowAllEgress: false`.
+
+cubestore:
+  remoteStorage:
+    type: minio
+    minio:
+      bucket: cube-prod
+      endpoint: http://minio.minio.svc.cluster.local:9000
+      region: us-east-1            # any value; MinIO ignores it
+      existingSecret: cube-minio-creds
+      accessKeyKey: access-key-id
+      secretKeyKey: secret-access-key
+
+# When you flip allowAllEgress to false, the chart's auto-egress rules
+# cover DNS + intra-namespace cube pods. MinIO lives in its own
+# namespace, so add it explicitly:
+networkPolicy:
+  enabled: true
+  allowAllEgress: false
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+
+# Replace with your actual datasource — example assumes an in-cluster
+# Postgres on the `data` namespace.
+datasources:
+  default:
+    type: postgres
+    host: postgres-primary.data.svc.cluster.local
+    port: 5432
+    database: analytics
+    user: cube
+    existingSecret: cube-postgres
+    passwordKey: password

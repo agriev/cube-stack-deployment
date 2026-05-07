@@ -824,8 +824,32 @@ networkPolicy:
   # - namespaceSelector:
   #     matchLabels:
   #       name: dashboards
-  # Allow all egress (default true; tighten for sensitive environments)
+
+  # When `true` (default), egress is unrestricted — backwards-compatible
+  # behavior. On-prem prod should set this to `false` AND populate
+  # `extraEgress` with rules for your data sources, S3 endpoint, and
+  # any external services the workload calls. With `false` the chart
+  # auto-allows: DNS to kube-system + intra-namespace cube-stack pods;
+  # everything else must be in `extraEgress`.
   allowAllEgress: true
+
+  # Extra NetworkPolicy egress rules — appended verbatim when
+  # `allowAllEgress: false`. Match the standard NetworkPolicy.spec.egress
+  # schema. Examples below cover the common on-prem patterns.
+  extraEgress: []
+  # - to:
+  #     - ipBlock:
+  #         cidr: 10.0.0.0/8                       # internal datasource VPC
+  #   ports:
+  #     - protocol: TCP
+  #       port: 5432                                # postgres
+  # - to:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: minio    # in-cluster MinIO
+  #   ports:
+  #     - protocol: TCP
+  #       port: 9000
 
 ## -----------------------------------------------------------------------------
 ## Tests run via `helm test`
