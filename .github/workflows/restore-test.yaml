@@ -179,29 +179,33 @@ jobs:
           echo "found cronjob: $CJ"
           kubectl -n cube create job --from=cronjob/$CJ backup-test-1
 
-          # Wait either condition=complete OR condition=failed, whichever
-          # comes first. The previous `wait --for=complete` masked
-          # failures with a generic timeout. 8m total covers cold runner
-          # image pulls + curl kubectl + exec tar + s3 upload.
-          end=$((SECONDS + 480))
-          while [ $SECONDS -lt $end ]; do
-            phase=$(kubectl -n cube get job backup-test-1 \
-              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
-            case "$phase" in
-              Complete) echo "✓ backup job complete"; break;;
-              Failed)   echo "::error::backup job failed"; break;;
-            esac
-            sleep 5
+          # Wait until a pod is scheduled, then stream its logs so we
+          # see what's happening in real time. `kubectl logs -f` blocks
+          # until the container exits, which is exactly the wait
+          # condition we want — no separate polling loop needed.
+          for i in $(seq 1 30); do
+            POD=$(kubectl -n cube get pods -l job-name=backup-test-1 \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            [ -n "$POD" ] && break
+            sleep 2
           done
+          if [ -z "$POD" ]; then
+            echo "::error::no pod created for backup-test-1" >&2
+            kubectl -n cube describe job backup-test-1 >&2
+            exit 1
+          fi
+          echo "found pod: $POD"
 
-          echo "--- backup-test-1 logs ---"
-          kubectl -n cube logs job/backup-test-1 --tail=200 || true
-          echo "--- backup-test-1 pod state ---"
-          kubectl -n cube describe pod -l job-name=backup-test-1 | tail -50 || true
+          # Wait for ContainerCreating → Running, then stream logs.
+          kubectl -n cube wait --for=condition=Ready pod/$POD --timeout=2m || true
+          echo "--- streaming backup pod logs ---"
+          kubectl -n cube logs -f $POD || true
+          echo "--- end of pod logs ---"
 
-          # Final check after logs were captured
+          # Job final state
           phase=$(kubectl -n cube get job backup-test-1 \
             -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+          echo "job phase: $phase"
           [ "$phase" = "Complete" ] || exit 1
 
       - name: verify tarball appears in MinIO
