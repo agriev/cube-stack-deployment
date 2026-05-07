@@ -39,6 +39,13 @@ refreshWorker:
       memory: 12Gi
 
 cubestore:
+  # Production: hard anti-affinity. Losing two routers to a single node
+  # breaks Raft quorum, so multi-node spread is mandatory. The default
+  # is `preferred` for dev/single-node compatibility.
+  antiAffinity:
+    enabled: true
+    type: required
+
   router:
     resources:
       requests:

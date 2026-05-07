@@ -42,14 +42,20 @@ spec:
           image: "{{ .Values.cubestore.workers.initRouterCheck.image.repository }}:{{ .Values.cubestore.workers.initRouterCheck.image.tag }}"
           imagePullPolicy: {{ .Values.cubestore.workers.initRouterCheck.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # PR-O1: bounded by `timeoutSeconds` (default 180) so a stuck
+          # router can't pin the worker pod indefinitely. After timeout
+          # the init container exits non-zero and Kubernetes restarts
+          # the pod with backoff, surfacing the failure to the operator.
           command:
             - /bin/sh
             - -c
             - |
-              until nc -vz {{ include "cubeStack.cubestore.router.fullname" . }} {{ .Values.cubestore.metaPort }}; do
-                echo "Waiting for Cube Store router..."
-                sleep 2
-              done
+              timeout {{ .Values.cubestore.workers.initRouterCheck.timeoutSeconds | default 180 }} sh -c '
+                until nc -vz {{ include "cubeStack.cubestore.router.fullname" . }} {{ .Values.cubestore.metaPort }}; do
+                  echo "Waiting for Cube Store router..."
+                  sleep 2
+                done
+              '
           resources: {{- toYaml .Values.cubestore.workers.initRouterCheck.resources | nindent 12 }}
       {{- end }}
       containers:
