@@ -168,8 +168,19 @@ jobs:
       - name: trigger one-shot backup job
         run: |
           set -euo pipefail
-          kubectl -n cube create job --from=cronjob/cube-cubestore-router-backup \
-            backup-test-1
+          # Discover the rendered CronJob by label rather than guessing
+          # the name; the chart's fullname helper prepends both release
+          # AND chart name (cube → cube-cube-stack-cubestore-router-backup).
+          CJ=$(kubectl -n cube get cronjob \
+            -l app.kubernetes.io/component=cubestore-backup \
+            -o jsonpath='{.items[0].metadata.name}')
+          if [ -z "$CJ" ]; then
+            echo "::error::no cronjob with label component=cubestore-backup found" >&2
+            kubectl -n cube get cronjob,deploy,sts >&2
+            exit 1
+          fi
+          echo "found cronjob: $CJ"
+          kubectl -n cube create job --from=cronjob/$CJ backup-test-1
           # The job runs once and exits; wait for it.
           kubectl -n cube wait --for=condition=complete \
             --timeout=5m job/backup-test-1
@@ -178,12 +189,36 @@ jobs:
       - name: verify tarball appears in MinIO
         run: |
           set -euo pipefail
-          kubectl -n minio port-forward svc/minio 9000:9000 &
-          sleep 3
-          mc alias set local http://localhost:9000 admin changeme
-          # Should find at least one .tar.gz under cube-stack/
-          mc ls local/cube-backups/cube-stack/ | tee /tmp/mc-ls
-          test "$(grep -c 'tar.gz' /tmp/mc-ls)" -ge 1
+          # mc as a Job in-cluster — same pattern as bucket creation,
+          # avoids port-forward race conditions.
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: mc-verify
+            namespace: minio
+          spec:
+            ttlSecondsAfterFinished: 60
+            backoffLimit: 1
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                  - name: mc
+                    image: minio/mc:RELEASE.2025-02-08T19-14-21Z
+                    command: [ /bin/sh, -c ]
+                    args:
+                      - |
+                        set -euo pipefail
+                        mc alias set local http://minio.minio.svc.cluster.local:9000 admin changeme
+                        echo "--- contents of cube-backups bucket ---"
+                        mc ls --recursive local/cube-backups/
+                        count=$(mc ls --recursive local/cube-backups/ | grep -c 'tar.gz' || true)
+                        echo "tar.gz objects: $count"
+                        [ "$count" -ge 1 ]
+          EOF
+          kubectl -n minio wait --for=condition=complete --timeout=2m job/mc-verify
+          kubectl -n minio logs job/mc-verify --tail 30
 
       # NOTE: the full uninstall + recreate-PVC + untar + reinstall
       # restore loop is documented in docs/RESTORE.md but exceeds the
