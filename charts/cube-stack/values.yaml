@@ -447,6 +447,11 @@ cubestore:
       tag: "2.17.42"
       pullPolicy: IfNotPresent
     kubectlVersion: v1.31.0
+    # S3 storage class. Empty (default) lets the backend pick its
+    # default tier — required for MinIO / Ceph which don't support
+    # AWS-specific tiers. For AWS S3, set to STANDARD_IA or
+    # GLACIER_IR for cost optimization.
+    storageClass: ""
     # PR-O3: PVC reclaim hint — backup tarballs land off-cluster, but
     # the source PVC must survive an accidental `helm uninstall`.
     # Operators can safely delete the StatefulSet and recreate it; the
