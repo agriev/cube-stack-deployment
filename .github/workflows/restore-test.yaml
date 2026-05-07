@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: restore-test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   vanilla:
     name: backup + restore (cube-stack vanilla, MinIO target)
@@ -31,18 +35,21 @@ jobs:
       - name: install kind + helm + mc
         run: |
           set -euo pipefail
+          # /usr/local/bin requires sudo on GitHub-hosted runners.
           # kind
-          curl -sLo /usr/local/bin/kind \
+          curl -sLo /tmp/kind \
             https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64
-          chmod +x /usr/local/bin/kind
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
           # helm 3.16
           curl -sL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | \
             tar xz -C /tmp
           sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
           # MinIO client (for verifying tarball)
-          curl -sLo /usr/local/bin/mc \
+          curl -sLo /tmp/mc \
             https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x /usr/local/bin/mc
+          chmod +x /tmp/mc
+          sudo mv /tmp/mc /usr/local/bin/mc
 
       - name: create kind cluster
         run: kind create cluster --wait 60s
