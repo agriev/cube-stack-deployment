@@ -438,13 +438,24 @@ cubestore:
     # S3 prefix that the CronJob writes to. The archive name is
     # appended at run time as `<prefix>/<release>-<UTC-timestamp>.tar.gz`.
     destination: "s3://my-cube-backups/cube-stack"
-    # The image needs aws-cli; kubectl is downloaded into /tmp at run
-    # time. For prod, bake an image with both pre-installed.
+    # PR-O3: image pinned to a specific aws-cli tag (was `:latest`,
+    # which made the chart ship "rolling deps" — every install
+    # potentially picks up a different aws-cli build). Roll forward
+    # by editing this tag explicitly.
     image:
       repository: amazon/aws-cli
-      tag: latest
+      tag: "2.17.42"
       pullPolicy: IfNotPresent
     kubectlVersion: v1.31.0
+    # PR-O3: PVC reclaim hint — backup tarballs land off-cluster, but
+    # the source PVC must survive an accidental `helm uninstall`.
+    # Operators can safely delete the StatefulSet and recreate it; the
+    # underlying volume stays.
+    pvcReclaimPolicy: Retain
+    # PR-O3: Velero-compatible volume annotation. When the namespace
+    # has a Velero scheduled backup, this opts the cubestore data
+    # volume in. Empty-string disables.
+    veleroVolumeName: data
     resources:
       requests:
         cpu: 100m
